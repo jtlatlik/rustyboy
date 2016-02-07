@@ -1,0 +1,7 @@
+[package]
+name = "rustyboy"
+version = "0.1.0"
+authors = ["jtlatlik <jtlatlik@techfak.uni-bielefeld.de>"]
+
+[dependencies]
+sdl2 = "0.12"

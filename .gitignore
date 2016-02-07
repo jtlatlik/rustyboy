@@ -1,0 +1,10 @@
+target
+Cargo.lock
+*.gb
+*.sav
+serial.txt
+boot.bin
+bgb/
+cpu_instrs/
+.project
+.settings
