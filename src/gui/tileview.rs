@@ -79,7 +79,7 @@ pub fn display(sys : ThreadSafeSystem) {
 				let video = &(*lock).video;
 
 				for i in 0..4 {
-					let c = (video.regs.bgp >> (2*i)) & 0x3;
+					let c = (*video.regs.bgp >> (2*i)) & 0x3;
 					palette[i] = match c {
 						0 => Color::RGB(255,255,255),
 						1 => Color::RGB(192,192,192),
@@ -88,12 +88,14 @@ pub fn display(sys : ThreadSafeSystem) {
 						_ => unreachable!()
 					}
 				}
+
+				let tileset_addr = if ((*video.regs.lcd_ctrl >> LCD_CONTROL_TSSEL) & 1) != 0 { 0 } else { 0x800 };
 				
 				for t  in 0..256  {
 					
 					tileset.push(renderer.create_texture_streaming(PixelFormatEnum::RGB24, (8,8)).unwrap());
 					tileset[t].with_lock(None, |buffer: &mut [u8], pitch :usize| {
-						let tile_addr = t*16;
+						let tile_addr = tileset_addr as usize + t*16;
 						for y in 0..8 {
 							let tile_data = [ video.vram0[tile_addr + y*2],  video.vram0[tile_addr + y*2 + 1]];
 							for x in 0..8 {
@@ -112,21 +114,21 @@ pub fn display(sys : ThreadSafeSystem) {
 				
 				
 				//now draw background with tile data
-				let tilemap_addr = 0x1800 + (((video.regs.lcd_ctrl >> LCD_CONTROL_BGMAP) & 1)  as u16)*0x400; 
+				let tilemap_addr = 0x1800 + (((*video.regs.lcd_ctrl >> LCD_CONTROL_BGMAP) & 1)  as u16)*0x400; 
 				
 				renderer.render_target().unwrap().create_and_set(PixelFormatEnum::RGB24, (256,256));
 				renderer.clear();
 				//render into new target texture
 				for y in 0..32 {
-					for x in 00..32 {
+					for x in 0..32 {
 						let offset : u16 = (y as u16)*32+(x as u16);
 						let index = video.vram0[(tilemap_addr + offset) as usize] as usize;
 						
-						renderer.copy(&tileset[index], None, Some(Rect::new_unwrap((y as i32)*8,(x as i32)*8,8,8)));
+						renderer.copy(&tileset[index], None, Some(Rect::new_unwrap((x as i32)*8,(y as i32)*8,8,8)));
 					}
 				}		
 			}
-			renderer.present();
+			//renderer.present();
 			
 			
 			match renderer.render_target().unwrap().reset().unwrap() {

@@ -9,12 +9,14 @@ impl CPU {
 			let mut lock = self.mem.write().unwrap();
 			let sys = &mut lock;
 			
+			let (iflags, ienable) = (sys.interrupt_regs.iflags.data, sys.interrupt_regs.ienable.data);
+			
 			for i in 0..5 { //check from highest to lowest priority
 				
-				if sys.interrupt_regs.iflags & sys.interrupt_regs.iswitch & (1<<i) != 0 {
+				if iflags & ienable & (1<<i) != 0 {
 					
 					//reset interrupt flag
-					sys.interrupt_regs.iflags &= !(1<<i);
+					sys.interrupt_regs.iflags.data &= !(1<<i);
 					
 					let isr_addr = match i {
 						0 => 0x40,

@@ -11,7 +11,7 @@ pub const SUB_FLAG : i32 = 6;
 pub const ZERO_FLAG : i32 = 7;
 
 pub struct GBRegisters {
-    pub af : Register,
+    af : Register,
     pub bc : Register,
     pub de : Register,
     pub hl : Register,
@@ -21,6 +21,18 @@ pub struct GBRegisters {
 }
 
 impl GBRegisters {
+	
+	pub fn new() -> GBRegisters {
+        GBRegisters {
+            af : 0,
+            bc : 0,
+            de : 0,
+            hl : 0,
+            sp : 0,
+            pc : 0,
+            ime : true,
+        }
+	}
     
     pub fn set8(&mut self, reg: Reg8Operand, val: u8) {
         match reg {
@@ -36,7 +48,7 @@ impl GBRegisters {
     
 	pub fn set16(&mut self, reg : Reg16Operand, val: u16) {
         match reg {
-            af => self.af = val ,
+            af => self.af = val & 0xfff0, //lowest nibble always zero
             bc => self.bc = val,
             de => self.de = val,
             hl => self.hl = val,
@@ -106,6 +118,7 @@ impl GBRegisters {
         println!("{}", self);
     }
 }
+
 impl fmt::Display for GBRegisters {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, concat!("AF={:>02x}|{:>02x}  BC={:>02x}|{:>02x}  DE={:>02x}|{:>02x}  HL={:>02x}|{:>02x} ",
@@ -114,18 +127,5 @@ impl fmt::Display for GBRegisters {
                  self.de.high(), self.de.low(), self.hl.high(), self.hl.low(),
                  self.sp, self.pc,
                  self.z_flag() as usize, self.n_flag()  as usize, self.h_flag() as usize,self.c_flag()  as usize)
-    }
-}
-impl Default for GBRegisters {
-    fn default() -> GBRegisters {
-        GBRegisters {
-            af : 0,
-            bc : 0,
-            de : 0,
-            hl : 0,
-            sp : 0,
-            pc : 0,
-            ime : true,
-        }
     }
 }

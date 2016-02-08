@@ -1,16 +1,20 @@
 pub mod system;
 
 pub mod video;
+mod ioregister;
 mod sound;
 mod timer;
+mod mbc;
+mod interrupt;
+mod wram;
+mod serial;
 
 use std::io::{self, Read};
 
 use std::sync::{Arc, RwLock};
 use std::thread::*;
 use std::thread;
-use std::rc::Rc;
-use std::cell::RefCell;
+
 
 use core::cpu::CPU;
 use self::system::*;
@@ -40,7 +44,8 @@ pub fn start(mut cpu : CPU, sys: ThreadSafeSystem) -> JoinHandle<()> {
 					{
 						let mut lock2  = sys.write().unwrap();
 						let mem = &mut lock2;
-						insn_bytes = [mem.read8(pc), mem.read8(pc+1), mem.read8(pc+2)];
+						
+						insn_bytes = [mem.read8(pc), mem.read8(pc.wrapping_add(1)), mem.read8(pc.wrapping_add(2))];
 					}
 					
 					//decode insn

@@ -39,6 +39,10 @@ macro_rules! try_r8_i8_mem8 {
 			$cycles += 8;
 			Ok($mem.read8(0xff00 + (o as u16)))
 		},
+		mem_io_reg(Reg8Operand::c) => {
+			$cycles += 4;
+			Ok($mem.read8(0xff00 + ($regs.get8(Reg8Operand::c) as u16)))
+		}
         _ => Err(ExecuteError::InvalidSrcOperand($src))
 	}))
 }
@@ -121,7 +125,7 @@ impl CPU {
         let mem = &mut lock;
         
         let mut cycles = 4;
-        let mut next_pc = regs.pc + insn.length as u16;
+        let mut next_pc = regs.pc.wrapping_add(insn.length as u16);
         
         cycles = try!(match insn.itype {
             //Loadcommands
@@ -133,15 +137,38 @@ impl CPU {
             			Ok(cycles)
             		},
             		reg16(rd) => { //16-bit move
-            			let data = try_r16_i16!(insn.src[0], regs, mem, cycles);
-            			regs.set16(rd, data);
-            			Ok(cycles)
+            			if let imm8(off) = insn.src[1] { //ld hl, sp+r8 
+            				let acc_in = regs.sp;
+            				let op = off as i8;
+                     		let (_, _,_,h,c) = arith_op(add, acc_in as u8, op as u8, 0);
+                        	let Wrapping(result) = Wrapping(acc_in) + Wrapping(op as u16);
+							regs.set_flag(ZERO_FLAG, false);
+							regs.set_flag(SUB_FLAG, false);
+                        	regs.set_flag(HALFCARRY_FLAG, h);
+                        	regs.set_flag(CARRY_FLAG, c);
+                        	regs.hl = result;
+                        	Ok(12)
+            			} else { // ld rd, ...
+            				cycles = 4;
+            				let data = try_r16_i16!(insn.src[0], regs, mem, cycles);
+            				regs.set16(rd, data);
+            				Ok(cycles)
+            			}
             		},
-            		mem_imm(addr) => { //8-bit direct store
-            			cycles = 16;
-            			let data = try_r8!(insn.src[0], regs);
-            			mem.write8(addr, data);
-            			Ok(cycles)
+            		mem_imm(addr) => { //direct store
+						match insn.src[0] {
+							reg8(r) => {
+		            			let data = regs.get8(r);
+		            			mem.write8(addr, data);
+		            			Ok(16)
+							}, 
+							reg16(Reg16Operand::sp) => {
+								let data =regs.get16(Reg16Operand::sp);
+								mem.write16(addr, data);
+								Ok(20)
+							},
+							_ => Err(ExecuteError::InvalidSrcOperand(insn.src[0]))
+						}
             		},
             		mem_reg(ra) => { //8-bit indirect store
             			cycles = 8;
@@ -169,13 +196,13 @@ impl CPU {
             	match insn.dest {
             		reg8(Reg8Operand::a) => {
             			let data = mem.read8(regs.hl);
-            			regs.af.set_high(data);
+            			regs.set8(Reg8Operand::a, data);
             			let Wrapping(adj_hl) = if insn.itype == ldi {  Wrapping(regs.hl) + Wrapping(1) } else {  Wrapping(regs.hl) - Wrapping(1) };
 						regs.hl = adj_hl;
             			Ok(8)
             		},
             		mem_reg(Reg16Operand::hl) => {
-            			let data = regs.af.high();
+            			let data = regs.get8(Reg8Operand::a);
             			mem.write8(regs.hl, data);
             			let Wrapping(adj_hl) = if insn.itype == ldi {  Wrapping(regs.hl) + Wrapping(1) } else {  Wrapping(regs.hl) - Wrapping(1) };
 						regs.hl = adj_hl;
@@ -224,18 +251,19 @@ impl CPU {
                         let op = try_i8!(insn.src[0], cycles) as i8;
                         let (_, _,_,h,c) = arith_op(insn.itype, acc_in as u8, op as u8, 0);
                         let Wrapping(result) = Wrapping(acc_in) + Wrapping(op as u16);
+						regs.set_flag(ZERO_FLAG, false);
 						regs.set_flag(SUB_FLAG, false);
                         regs.set_flag(HALFCARRY_FLAG, h);
                         regs.set_flag(CARRY_FLAG, c);
-						regs.hl = result;
+						regs.sp = result;
                         Ok(cycles)
                     },
 					reg16(Reg16Operand::hl) => {
 						let acc_in = regs.hl;
 						let op = regs.get16(try_r16!(insn.src[0], InvalidSrcOperand));
 						
-						let (_, _,_,h,c) = arith_op(insn.itype, acc_in as u8, op as u8, 0);
-						let Wrapping(result) = Wrapping(acc_in) + Wrapping(op);
+						let (_, _,_,h,c) = arith_op(add, acc_in as u8, op as u8, 0);
+						let result = acc_in.wrapping_add(op);
 						regs.set_flag(SUB_FLAG, false);
                         regs.set_flag(HALFCARRY_FLAG, h);
                         regs.set_flag(CARRY_FLAG, c);
@@ -246,10 +274,10 @@ impl CPU {
                 }
             },
             and | xor | or => {
-            	let acc = regs.af.high();
+            	let acc = regs.get8(Reg8Operand::a);
             	let op = try_r8_i8_mem8!(insn.src[0], regs, mem, cycles);
             	let (result, z) = logic_op(insn.itype, acc, op);
-            	regs.af.set_high(result);
+            	regs.set8(Reg8Operand::a, result);
                 regs.set_flag(ZERO_FLAG, z);
                 regs.set_flag(SUB_FLAG, false);
                 regs.set_flag(HALFCARRY_FLAG, insn.itype == and);
@@ -288,10 +316,27 @@ impl CPU {
             		_ => Err(ExecuteError::InvalidDestOperand(insn.dest))
             	}
             },
-            daa => unimplemented!(),
+            daa => {
+            	let rega = regs.get8(Reg8Operand::a);
+            	let mut acc = rega;
+            	let mut c = false;
+            	if (rega & 0xf) > 9 || regs.h_flag() {
+					acc = acc.wrapping_add(if regs.n_flag() { 0xfa } else { 0x06 })
+            	}
+            	if (rega >> 4) > 9 || regs.c_flag() {
+            		acc = acc.wrapping_add(if regs.n_flag() { 0xc4 } else { 0x60 });
+            		c = true
+            	}
+            	regs.set8(Reg8Operand::a, acc);
+            	regs.set_flag(ZERO_FLAG, acc == 0);
+            	regs.set_flag(HALFCARRY_FLAG, false);
+            	regs.set_flag(CARRY_FLAG, c);
+            	Ok(4)
+            	
+            },
             cpl => {
-            	let data = regs.af.high();
-            	regs.af.set_high(!data);
+            	let data = regs.get8(Reg8Operand::a);
+            	regs.set8(Reg8Operand::a, !data);
             	regs.set_flag(SUB_FLAG, true);
             	regs.set_flag(HALFCARRY_FLAG, true);
             	Ok(4)
@@ -355,10 +400,14 @@ impl CPU {
             //CPU-Controlcommands
             ccf => {
             	let v = regs.c_flag();
+            	regs.set_flag(SUB_FLAG, false);
+            	regs.set_flag(HALFCARRY_FLAG, false);
             	regs.set_flag(CARRY_FLAG, !v);
             	Ok(4)
             },
             scf => {
+            	regs.set_flag(SUB_FLAG, false);
+            	regs.set_flag(HALFCARRY_FLAG, false);
             	regs.set_flag(CARRY_FLAG, true);
             	Ok(4)
             },
@@ -436,8 +485,7 @@ impl CPU {
             	}
             },
             rst => {
-				let Wrapping(adj_sp) = Wrapping(regs.sp) - Wrapping(2);
-        		regs.sp = adj_sp;
+        		regs.sp = regs.sp.wrapping_sub(2);
 				mem.write16(regs.sp, next_pc);
 				
 				next_pc = try!(match insn.src[0] {
@@ -472,14 +520,14 @@ fn rot_shift_op(itype: InstructionType, acc: u8, ci: u8) -> (u8, bool) {
 	let high_c = 0x80 & acc != 0;
 	let low_c = acc & 1 != 0;
 	match itype {
-        rl => ( acc << 1 | ci , high_c),
-        rlc => ( acc << 1 | (high_c as u8), high_c),
-        rr => ( acc >> 1 | ( ci << 7), low_c),
-        rrc => (acc >> 1 | (acc&1 << 7), low_c),
+        rl | rla => ( (acc << 1) | ci , high_c),
+        rlc | rlca => ( (acc << 1) | (high_c as u8), high_c),
+        rr | rra => ( (acc >> 1) | ( ci << 7), low_c),
+        rrc | rrca => ((acc >> 1) | ((acc&1) << 7), low_c),
         sla => ( acc << 1, high_c),
         sra => ( ((acc as i8) >> 1) as u8, low_c),
         srl => ( acc >> 1, low_c),
-        swap => ( (acc & 0xf << 4) | (acc >> 4), false),
+        swap => ( ((acc & 0xf) << 4) | (acc >> 4), false),
         _ => unreachable!()
 	}
 }

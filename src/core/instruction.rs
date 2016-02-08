@@ -66,7 +66,6 @@ pub struct Instruction {
     pub dest : Operand,
     pub src : [Operand; 2],
     pub cc : CCOperand,
-    pub cycles : u32,
     pub length : u32
 }
 

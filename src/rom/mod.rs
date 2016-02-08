@@ -1,4 +1,4 @@
-mod header;
+pub mod header;
 
 use std::fs::File;
 use std::io::Read;
@@ -14,12 +14,12 @@ pub type Bank = Box<[u8; NUM_BANK_BYTES]>;
 
 pub struct Rom {
     pub banks : Vec<Bank>,
-    title : String,
-    cgb_flag : bool,
-    sgb_flag : bool,
-    rom_type : CartridgeType,
-    rom_size : RomSize,
-    rom_manufacturer : [u8; 4]
+    pub title : String,
+    pub cgb_flag : bool,
+    pub sgb_flag : bool,
+    pub rom_type : CartridgeType,
+    pub rom_size : RomSize,
+    pub rom_manufacturer : [u8; 4]
 }
 
 impl Rom {

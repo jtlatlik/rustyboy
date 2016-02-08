@@ -35,7 +35,6 @@ macro_rules! insn {
             dest : $dest,
             src : [$src, Operand::none],
             cc : $cc,
-            cycles : 4,
             length : length}
     })
 }
@@ -122,15 +121,15 @@ impl CPU {
             0xc4 => insn!(call, none, imm16(nn), CCOperand::nz),
             0xc5 => insn!(push, none, reg16(bc)),
             0xc6 => insn!(add, reg8(a), imm8(n)),
-            0xc7 => insn!(rst, none, imm8(0x00)),
+            0xc7 => Instruction { length: 1, ..insn!(rst, none, imm8(0x00))},
             0xc8 => insn!(ret, none, none, CCOperand::z),
             0xc9 => insn!(ret),
             0xca => insn!(jp, none, imm16(nn), CCOperand::z),
-            0xcb => decode_cb_prefix_inst(opcode[1]),
+            0xcb => Instruction { length: 2, ..decode_cb_prefix_inst(opcode[1])},
             0xcc => insn!(call, none, imm16(nn), CCOperand::z),
             0xcd => insn!(call, none, imm16(nn)),
             0xce => insn!(adc, reg8(a), imm8(n)),
-            0xcf => insn!(rst, none, imm8(0x08)),
+            0xcf => Instruction { length: 1, ..insn!(rst, none, imm8(0x08))},
             0xd0 => insn!(ret, none, none, CCOperand::nc),
             0xd1 => insn!(pop, reg16(de)),
             0xd2 => insn!(jp, none, imm16(nn), CCOperand::nc),
@@ -138,7 +137,7 @@ impl CPU {
             0xd4 => insn!(call, none, imm16(nn), CCOperand::nc),
             0xd5 => insn!(push, none, reg16(de)),
             0xd6 => insn!(sub, reg8(a), imm8(n)),
-            0xd7 => insn!(rst, none, imm8(0x10)),
+            0xd7 => Instruction { length: 1, ..insn!(rst, none, imm8(0x10))},
             0xd8 => insn!(ret, none, none, CCOperand::c),
             0xd9 => insn!(reti),
             0xda => insn!(jp, none, imm16(nn), CCOperand::c),
@@ -146,7 +145,7 @@ impl CPU {
             0xdc => insn!(call, none, imm16(nn), CCOperand::c),
             0xdd => insn!(invalid),
             0xde => insn!(sbc, reg8(a), imm8(n)),
-            0xdf => insn!(rst, none, imm8(0x18)),
+            0xdf => Instruction { length: 1, ..insn!(rst, none, imm8(0x18))},
             0xe0 => insn!(ld, mem_io_imm(n), reg8(a)),
             0xe1 => insn!(pop, reg16(hl)),
             0xe2 => insn!(ld, mem_io_reg(c), reg8(a)),
@@ -154,7 +153,7 @@ impl CPU {
             0xe4 => insn!(invalid),
             0xe5 => insn!(push, none, reg16(hl)),
             0xe6 => insn!(and, reg8(a), imm8(n)),
-            0xe7 => insn!(rst, none, imm8(0x20)),
+            0xe7 => Instruction { length: 1, ..insn!(rst, none, imm8(0x20))},
             0xe8 => insn!(add, reg16(sp), imm8(n)), //caution: imm8 signed here
             0xe9 => insn!(jp, none, reg16(hl)),
             0xea => insn!(ld, mem_imm(nn), reg8(a)),
@@ -162,7 +161,7 @@ impl CPU {
             0xec => insn!(invalid),
             0xed => insn!(invalid),
             0xee => insn!(xor, reg8(a), imm8(n)),
-            0xef => insn!(rst, none, imm8(0x28)),
+            0xef => Instruction { length: 1, ..insn!(rst, none, imm8(0x28))},
             0xf0 => insn!(ld, reg8(a), mem_io_imm(n)),
             0xf1 => insn!(pop, reg16(af)),
             0xf2 => insn!(ld, reg8(a), mem_io_reg(c)),
@@ -170,15 +169,15 @@ impl CPU {
             0xf4 => insn!(invalid),
             0xf5 => insn!(push, none, reg16(af)),
             0xf6 => insn!(or, reg8(a), imm8(n)),
-            0xf7 => insn!(rst, none, imm8(0x30)),
-            0xf8 => Instruction { src : [reg16(sp), imm8(n)], ..insn!(ld, reg16(hl)) }, //caution: imm8 signed here
+            0xf7 =>Instruction { length: 1, ..insn!(rst, none, imm8(0x30))},
+            0xf8 => Instruction { src : [reg16(sp), imm8(n)], length: 2, ..insn!(ld, reg16(hl)) }, //caution: imm8 signed here
             0xf9 => insn!(ld, reg16(sp),reg16(hl)),
             0xfa => insn!(ld, reg8(a), mem_imm(nn)),
             0xfb => insn!(ei),
             0xfc => insn!(invalid),
             0xfd => insn!(invalid),
             0xfe => insn!(cp, reg8(a), imm8(n)),
-            0xff => insn!(rst, none, imm8(0x38)),
+            0xff => Instruction { length: 1, ..insn!(rst, none, imm8(0x38))},
             _ => unreachable!()
         }
     }
@@ -188,8 +187,8 @@ fn decode_cb_prefix_inst(opcode : u8) -> Instruction {
     match opcode as usize {
         op @ 0x00 ... 0x3f => insn!(CB_ALU_LUT[(op>>3)&0x7], OP_LUT[op & 0x7]),
         op @ 0x40 ... 0x7f => Instruction { src : [imm8(((op >> 3)&0x7)as u8 ), OP_LUT[op&0x7]] , ..insn!(bit) },
-        op @ 0x80 ... 0xbf => insn!(set, OP_LUT[op&0x7], imm8(((op >> 3)&0x7) as u8 )),
-        op @ 0xc0 ... 0xff => insn!(res, OP_LUT[op&0x7], imm8(((op >> 3)&0x7) as u8)),
+        op @ 0x80 ... 0xbf => insn!(res, OP_LUT[op&0x7], imm8(((op >> 3)&0x7) as u8 )),
+        op @ 0xc0 ... 0xff => insn!(set, OP_LUT[op&0x7], imm8(((op >> 3)&0x7) as u8)),
         _ => insn!(invalid)
     }
 }

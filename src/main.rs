@@ -9,7 +9,7 @@ use std::process;
 
 use core::cpu::CPU;
 use system::system::GBSystem;
-
+use core::operands::Reg16Operand;
 use std::str::FromStr;
 
 use rom::*;
@@ -46,15 +46,19 @@ fn main() {
     //rom.dump_header();
     
     
+    let mut raw_sys = GBSystem::new(rom);
+    
+    raw_sys.write8(0xff10, 0x80);
+    
 
 
 	//create CPU peripherals
-	let sys = Arc::new(RwLock::new(GBSystem::new(rom)));
+	let sys = Arc::new(RwLock::new(raw_sys));
 	//create CPU
 	let mut cpu = CPU::new(sys.clone());
 	
 	cpu.regs.pc = 0x100;
-    cpu.regs.af = 0x01b0;
+    cpu.regs.set16(Reg16Operand::af, 0x01b0);
     cpu.regs.bc = 0x0013;
     cpu.regs.de = 0x00d8;
     cpu.regs.hl = 0x014d;

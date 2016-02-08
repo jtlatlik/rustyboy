@@ -14,7 +14,7 @@ impl CPU {
 	
 	pub fn new(sys : Arc<RwLock<GBSystem>>) -> CPU {
 	    CPU {
-	        regs : GBRegisters { ..Default::default() },
+	        regs : GBRegisters::new(),
 	        mem : sys
 	    }
 	}
