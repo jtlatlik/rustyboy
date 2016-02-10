@@ -66,7 +66,7 @@ pub struct Instruction {
     pub dest : Operand,
     pub src : [Operand; 2],
     pub cc : CCOperand,
-    pub length : u32
+    pub length : u16
 }
 
 impl fmt::Display for Instruction {
@@ -74,8 +74,8 @@ impl fmt::Display for Instruction {
         write!(f, "{:?}{}\t", self.itype, self.cc);
 
         match self.itype {
-            invalid | nop | ret | reti | di | ei => Ok(()),
-            jp | jr | call | push => write!(f, "{}", self.src[0]),
+            invalid | nop | ret | reti | di | ei | halt| stop => Ok(()),
+            jp | jr | call | push | rst => write!(f, "{}", self.src[0]),
             inc | dec | pop => write!(f, "{}", self.dest),
             bit | set | res => write!(f, "{}, {}", self.src[1], self.src[0]),
             _ => write!(f, "{}, {}", self.dest, self.src[0])

@@ -20,7 +20,7 @@ enum MBCType {
 
 
 pub struct MBC {
-	rom : Rom,
+	pub rom : Rom,
 	ram : ExtRAMBank,
 	ctype : MBCType,
 	rom_bank : u8,

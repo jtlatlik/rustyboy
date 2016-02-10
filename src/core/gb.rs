@@ -121,11 +121,10 @@ impl GBRegisters {
 
 impl fmt::Display for GBRegisters {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, concat!("AF={:>02x}|{:>02x}  BC={:>02x}|{:>02x}  DE={:>02x}|{:>02x}  HL={:>02x}|{:>02x} ",
-                 "SP={:>04x} PC={:>04x} | Z={} N={} H={} C={} |"), 
-                 self.af.high(), self.af.low(), self.bc.high(), self.bc.low(),
-                 self.de.high(), self.de.low(), self.hl.high(), self.hl.low(),
-                 self.sp, self.pc,
-                 self.z_flag() as usize, self.n_flag()  as usize, self.h_flag() as usize,self.c_flag()  as usize)
+        write!(f, "AF={:>04x} BC={:>04x} DE={:>04x} HL={:>04x} SP={:>04x} PC={:>04x} Z={} N={} H={} C={} IME={}", 
+                 self.af, self.bc, self.de, self.hl, self.sp, self.pc,
+                 self.z_flag() as usize, self.n_flag()  as usize, 
+                 self.h_flag() as usize,self.c_flag()  as usize,
+        		 self.ime as usize)
     }
 }

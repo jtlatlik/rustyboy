@@ -1,19 +1,18 @@
 use std::thread;
+
 use super::sdl2::pixels::PixelFormatEnum;
 use super::sdl2::pixels::Color;
 use super::sdl2::rect::Point;
 use super::sdl2::rect::Rect;
 use super::sdl2::event::Event;
 use super::sdl2::keyboard::Keycode;
-use system::system::GBSystem;
-use std::sync::{Arc, RwLock};
-
-
-use system::video::*;
-//use super::sdl2::render::{Texture,Renderer, RenderTarget};
 use super::sdl2::render::*;
 
-use system::*;
+use std::process;
+
+use system::system::GBSystem;
+use std::sync::{Arc, RwLock};
+use system::video::*;
 
 const SCALE : u32 = 4;
 const TILE_SIZE :u32 = SCALE*8;
@@ -42,8 +41,8 @@ fn draw_tileset(renderer : &mut Renderer, tileset : Vec<Texture>) {
 	
 }
 
-pub fn display(sys : ThreadSafeSystem) {
-	
+pub fn display(sys : Arc<RwLock<VideoData>>) {
+
     let sdl_context = super::sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
     
@@ -61,7 +60,8 @@ pub fn display(sys : ThreadSafeSystem) {
 	        for event in event_pump.poll_iter() {
 	            match event {
 	                Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-	                    break 'running
+	                	process::exit(0);
+	                    //break 'running
 	                },
 	                _ => {}
 	            }
@@ -76,7 +76,7 @@ pub fn display(sys : ThreadSafeSystem) {
 	        //acquire read lock and read tile data
 			{
 				let lock = sys.read().unwrap();
-				let video = &(*lock).video;
+				let video = &lock;
 
 				for i in 0..4 {
 					let c = (*video.regs.bgp >> (2*i)) & 0x3;
@@ -128,8 +128,6 @@ pub fn display(sys : ThreadSafeSystem) {
 					}
 				}		
 			}
-			//renderer.present();
-			
 			
 			match renderer.render_target().unwrap().reset().unwrap() {
 				
@@ -144,4 +142,5 @@ pub fn display(sys : ThreadSafeSystem) {
 			
 	        thread::sleep_ms(100)
 	    }
+
 }

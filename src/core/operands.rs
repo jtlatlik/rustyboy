@@ -23,6 +23,37 @@ pub enum Reg16Operand {
     pc
 }
 
+impl Reg16Operand {
+	
+	pub fn from_str(str : &str) -> Reg16Operand {
+		match str {
+			"af" => Reg16Operand::af,
+			"bc" => Reg16Operand::bc,
+			"de" => Reg16Operand::de,
+			"hl" => Reg16Operand::hl,
+			"sp" => Reg16Operand::sp,
+			"pc" => Reg16Operand::pc,
+			_ => unreachable!()
+		}
+	} 
+}
+
+impl Reg8Operand {
+	
+	pub fn from_str(str : &str) -> Reg8Operand {
+		match str {
+			"a" => Reg8Operand::a,
+			"b" => Reg8Operand::b,
+			"c" => Reg8Operand::c,
+			"d" => Reg8Operand::d,
+			"e" => Reg8Operand::e,
+			"h" => Reg8Operand::h,
+			"l" => Reg8Operand::l,
+			_ => unreachable!()
+		}
+	} 
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum CCOperand {
     none,

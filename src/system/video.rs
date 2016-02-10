@@ -1,4 +1,7 @@
+use std::sync::{Arc, RwLock};
 use std::boxed::Box;
+
+use super::interrupt::{self, InterruptRegisters};
 use super::system::MemoryAccess;
 use super::ioregister::IORegister;
 
@@ -40,10 +43,24 @@ pub struct VideoData {
 	pub vram0 : VRAMBank,
 	pub oam : [u8; 160],
 	
-	pub mode_cycles : u32
+	interrupt_regs : Arc<RwLock<InterruptRegisters>>,
+	mode_cycles : u32
 }
 
 impl VideoData {
+	
+	pub fn new(iregs : Arc<RwLock<InterruptRegisters>>) -> VideoData {
+		VideoData {		
+			vram0 : Box::new([0;VRAM_BANK_SIZE]),
+			regs : VideoRegisters { 
+				lcd_status: IORegister::new().write_mask(bits!(6 5 4 3)),
+				ly : IORegister::new().read_only(),
+				..Default::default() },
+			oam : [0; 160],
+			mode_cycles : 0,
+			interrupt_regs : iregs
+		}
+	}
 	
 	pub fn update(&mut self, delta : u32) {
 		self.mode_cycles += delta;
@@ -57,7 +74,10 @@ impl VideoData {
 					*self.regs.ly += 1;
 					if *self.regs.ly >= 144 {
 						*self.regs.lcd_status = status & 0xfc | 1;
-						//TODO request VBLANK interrupt						
+						{
+							let mut iregs = self.interrupt_regs.write().unwrap();
+							*iregs.iflags |= interrupt::INTERRUPT_VBLANK;  
+						}
 					} else {
 						*self.regs.lcd_status = status & 0xfc | 2;
 					}
@@ -88,20 +108,6 @@ impl VideoData {
 			_ => unreachable!()
 		}
 		
-	}
-}
-
-impl Default for VideoData {
-	fn default() -> VideoData {
-		VideoData {
-			vram0 : Box::new([0;VRAM_BANK_SIZE]),
-			regs : VideoRegisters { 
-				lcd_status: IORegister::new().write_mask(bits!(6 5 4 3)),
-				ly : IORegister::new().read_only(),
-				..Default::default() },
-			oam : [0; 160],
-			mode_cycles : 0
-		}
 	}
 }
 

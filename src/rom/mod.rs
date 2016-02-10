@@ -6,6 +6,7 @@ use std::io;
 use std::str;
 use std::mem;
 
+
 use self::header::*;
 use self::header::RomSize::*;
 
@@ -36,13 +37,16 @@ impl Rom {
     }
 
     pub fn create_from_file(filename : &str) -> Result<Rom, io::Error> {
+    	
+    	info!("Opening ROM {}", filename);
         //Open file for reading...
         let mut file = try!(File::open(filename));
         
         let mut banks = Vec::new();
         
         
-        println!("Reading ROM header...");
+        info!("Reading ROM header...");
+        
         //read first bank
         let mut data : [u8; NUM_BANK_BYTES] = [0; NUM_BANK_BYTES];
         try!(file.read_exact(&mut data));
@@ -64,14 +68,14 @@ impl Rom {
         //now we know the size of the ROM. read remaining banks.
         let mut num_remaining_bytes = Rom::get_size_in_bytes(&rom_size) - NUM_BANK_BYTES;
         assert!(num_remaining_bytes % NUM_BANK_BYTES == 0);
-        println!("Reading {} more bytes...", num_remaining_bytes);        
+        info!("Reading {} more bytes...", num_remaining_bytes);        
         while num_remaining_bytes > 0 {
             let mut data : [u8; NUM_BANK_BYTES] = [0; NUM_BANK_BYTES];
             try!(file.read_exact(&mut data));
             banks.push(Box::new(data));
             num_remaining_bytes-=NUM_BANK_BYTES;
         }
-
+		info!("Successfully read ROM");
         Ok(Rom { 
            banks : banks,
            title : title.to_string(),

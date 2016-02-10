@@ -1,5 +1,3 @@
-use std::num::Wrapping;
-
 use super::cpu::CPU;
 use super::gb::*;
 use super::memory::*;
@@ -120,9 +118,7 @@ impl CPU {
     pub fn execute(&mut self, insn: Instruction) -> Result<u32, ExecuteError> {
         
         let regs = &mut self.regs;
-        
-        let mut lock = self.mem.write().unwrap();
-        let mem = &mut lock;
+        let mut mem = self.sys.borrow_mut();
         
         let mut cycles = 4;
         let mut next_pc = regs.pc.wrapping_add(insn.length as u16);
@@ -141,7 +137,7 @@ impl CPU {
             				let acc_in = regs.sp;
             				let op = off as i8;
                      		let (_, _,_,h,c) = arith_op(add, acc_in as u8, op as u8, 0);
-                        	let Wrapping(result) = Wrapping(acc_in) + Wrapping(op as u16);
+                        	let result = acc_in.wrapping_add(op as u16);
 							regs.set_flag(ZERO_FLAG, false);
 							regs.set_flag(SUB_FLAG, false);
                         	regs.set_flag(HALFCARRY_FLAG, h);
@@ -197,15 +193,13 @@ impl CPU {
             		reg8(Reg8Operand::a) => {
             			let data = mem.read8(regs.hl);
             			regs.set8(Reg8Operand::a, data);
-            			let Wrapping(adj_hl) = if insn.itype == ldi {  Wrapping(regs.hl) + Wrapping(1) } else {  Wrapping(regs.hl) - Wrapping(1) };
-						regs.hl = adj_hl;
+						regs.hl = if insn.itype == ldi {  regs.hl.wrapping_add(1) } else {  regs.hl.wrapping_sub(1)};
             			Ok(8)
             		},
             		mem_reg(Reg16Operand::hl) => {
             			let data = regs.get8(Reg8Operand::a);
             			mem.write8(regs.hl, data);
-            			let Wrapping(adj_hl) = if insn.itype == ldi {  Wrapping(regs.hl) + Wrapping(1) } else {  Wrapping(regs.hl) - Wrapping(1) };
-						regs.hl = adj_hl;
+						regs.hl = if insn.itype == ldi {  regs.hl.wrapping_add(1) } else {  regs.hl.wrapping_sub(1)};
             			Ok(8)
             		},
             		_ => Err(InvalidDestOperand(insn.dest))
@@ -213,8 +207,7 @@ impl CPU {
             },
             push => {
             	let reg = try_r16!(insn.src[0], InvalidSrcOperand);
-        		let Wrapping(adj_sp) = Wrapping(regs.sp) - Wrapping(2);
-        		regs.sp = adj_sp;
+        		regs.sp = regs.sp.wrapping_sub(2);
             	mem.write16(regs.sp, regs.get16(reg));
             	Ok(16)
             },
@@ -222,8 +215,7 @@ impl CPU {
             	let reg = try_r16!(insn.dest, InvalidDestOperand);
             	let data = mem.read16(regs.sp);
             	regs.set16(reg, data);
-				let Wrapping(adj_sp) = Wrapping(regs.sp) + Wrapping(2);
-            	regs.sp = adj_sp;
+            	regs.sp = regs.sp.wrapping_add(2);
             	Ok(12)
             },
             //Arithmetic/logical Commands
@@ -250,24 +242,28 @@ impl CPU {
                         let acc_in = regs.sp;
                         let op = try_i8!(insn.src[0], cycles) as i8;
                         let (_, _,_,h,c) = arith_op(insn.itype, acc_in as u8, op as u8, 0);
-                        let Wrapping(result) = Wrapping(acc_in) + Wrapping(op as u16);
+						regs.sp = acc_in.wrapping_add(op as u16);
 						regs.set_flag(ZERO_FLAG, false);
 						regs.set_flag(SUB_FLAG, false);
                         regs.set_flag(HALFCARRY_FLAG, h);
                         regs.set_flag(CARRY_FLAG, c);
-						regs.sp = result;
                         Ok(cycles)
                     },
 					reg16(Reg16Operand::hl) => {
-						let acc_in = regs.hl;
+						let acc_in = regs.hl as u32;
 						let op = regs.get16(try_r16!(insn.src[0], InvalidSrcOperand));
 						
-						let (_, _,_,h,c) = arith_op(add, acc_in as u8, op as u8, 0);
-						let result = acc_in.wrapping_add(op);
+						let acc_in12 = regs.hl & 0x0fff;
+						let op12 = op & 0x0fff;
+
+						let result = acc_in.wrapping_add(op as u32);
+						let h = (acc_in12 + op12) & 0x1000 != 0;
+						let c = result & 0x10000 != 0;
+						
 						regs.set_flag(SUB_FLAG, false);
                         regs.set_flag(HALFCARRY_FLAG, h);
                         regs.set_flag(CARRY_FLAG, c);
-						regs.hl = result;
+						regs.hl = result as u16;
 						Ok(8)
 					} 
                     _ => Err(InvalidDestOperand(insn.dest))
@@ -304,12 +300,8 @@ impl CPU {
 		            	Ok(cycles)
             		},
             		reg16(rd) => {
-            			let op = Wrapping(regs.get16(rd));
-            			let Wrapping(result) = match insn.itype {
-            				inc => op + Wrapping(1), 
-            				dec => op - Wrapping(1),
-            				_ => unreachable!()
-            			};
+            			let op = regs.get16(rd);
+            			let result = if insn.itype == inc { op.wrapping_add(1) } else { op.wrapping_sub(1) };
             			regs.set16(rd, result);
             			Ok(8)
             		},
@@ -318,21 +310,33 @@ impl CPU {
             },
             daa => {
             	let rega = regs.get8(Reg8Operand::a);
-            	let mut acc = rega;
-            	let mut c = false;
-            	if (rega & 0xf) > 9 || regs.h_flag() {
-					acc = acc.wrapping_add(if regs.n_flag() { 0xfa } else { 0x06 })
+            	let mut acc = rega as u16;
+            	let mut c = regs.c_flag();
+            	
+            	if regs.n_flag() {
+            		if (rega & 0xf) > 9 || regs.h_flag() {
+            			acc = acc.wrapping_add(0x06)
+            		}
+            		if rega  > 0x9f || regs.c_flag() {
+            			acc = acc.wrapping_add(0x06)
+            		}
+            	} else {
+					if regs.h_flag() {
+						acc = acc.wrapping_sub(0x06) & 0xff
+					}
+					if regs.c_flag() {
+						acc = acc.wrapping_sub(0x60)
+					}
             	}
-            	if (rega >> 4) > 9 || regs.c_flag() {
-            		acc = acc.wrapping_add(if regs.n_flag() { 0xc4 } else { 0x60 });
+            	if acc & 0x100 != 0 {
             		c = true
             	}
-            	regs.set8(Reg8Operand::a, acc);
-            	regs.set_flag(ZERO_FLAG, acc == 0);
-            	regs.set_flag(HALFCARRY_FLAG, false);
+            	
+				regs.set8(Reg8Operand::a, acc as u8);
+            	regs.set_flag(ZERO_FLAG, (acc & 0xff) == 0);
+				regs.set_flag(HALFCARRY_FLAG, false);
             	regs.set_flag(CARRY_FLAG, c);
             	Ok(4)
-            	
             },
             cpl => {
             	let data = regs.get8(Reg8Operand::a);
@@ -412,8 +416,16 @@ impl CPU {
             	Ok(4)
             },
             nop => Ok(4),
-            halt => unimplemented!(),
-            stop => unimplemented!(),
+            halt => {
+            	//we emulate halt by keeping the old pc value and setting halt_mode
+            	next_pc = regs.pc;
+            	self.halt_mode = true;
+            	Ok(4)
+            },
+            stop => {
+            	self.stop_mode = true;
+            	Ok(4)
+            },
             di => {
             	regs.ime = false;
             	Ok(4)
@@ -442,8 +454,7 @@ impl CPU {
                 });
 
                 if regs.cc_satisfied(insn.cc) {
-					let Wrapping(target) = Wrapping(next_pc) + Wrapping(off8 as u16);
-					next_pc = target;
+					next_pc = next_pc.wrapping_add(off8 as u16);
                 	Ok(16)
                 } else {
                 	Ok(12)
@@ -451,9 +462,7 @@ impl CPU {
             },
             call => {
             	if regs.cc_satisfied(insn.cc) {
-					let Wrapping(adj_sp) = Wrapping(regs.sp) - Wrapping(2);
-            		regs.sp = adj_sp;
-					
+            		regs.sp = regs.sp.wrapping_sub(2);
 					mem.write16(regs.sp, next_pc);
 					next_pc = try!(match insn.src[0] {
                     	imm16(addr) => Ok(addr),
@@ -468,8 +477,7 @@ impl CPU {
             	if regs.cc_satisfied(insn.cc) {
             		cycles = 16;
             		next_pc = mem.read16(regs.sp);
-            		let Wrapping(adj_sp) = Wrapping(regs.sp) + Wrapping(2);
-            		regs.sp = adj_sp;
+					regs.sp = regs.sp.wrapping_add(2);
             		
             		if insn.cc != CCOperand::none {
             			cycles += 4
@@ -494,7 +502,7 @@ impl CPU {
             	});
         		Ok(16)
             },
-            invalid => Err(InvalidInstruction)
+            invalid => Ok(4)/*Err(InvalidInstruction)*/
         });
         
         //update program counter
@@ -521,9 +529,9 @@ fn rot_shift_op(itype: InstructionType, acc: u8, ci: u8) -> (u8, bool) {
 	let low_c = acc & 1 != 0;
 	match itype {
         rl | rla => ( (acc << 1) | ci , high_c),
-        rlc | rlca => ( (acc << 1) | (high_c as u8), high_c),
+        rlc | rlca => (acc.rotate_left(1), high_c),
         rr | rra => ( (acc >> 1) | ( ci << 7), low_c),
-        rrc | rrca => ((acc >> 1) | ((acc&1) << 7), low_c),
+        rrc | rrca => (acc.rotate_right(1), low_c),
         sla => ( acc << 1, high_c),
         sra => ( ((acc as i8) >> 1) as u8, low_c),
         srl => ( acc >> 1, low_c),
@@ -539,22 +547,22 @@ fn arith_op(itype : InstructionType, acc: u8, op: u8, ci : u8) -> (u8, bool, boo
 		_ => 0,
 	};
 	
-	let (w_acc8, w_acc4) = (Wrapping(acc as u16), Wrapping(acc & 0xf));
-	let (w_op8, w_op4) = (Wrapping(op as u16), Wrapping(op & 0xf));
-	let (w_ci8, w_ci4) = (Wrapping(ci as u16), Wrapping(ci & 0xf));
+	let (acc8, acc4) = ((acc as u16), (acc & 0xf));
+	let (op8, op4) = ((op as u16), (op & 0xf));
+	let (ci8, ci4) = ((ci as u16), (ci & 0xf));
 	
-	let (Wrapping(res8), Wrapping(res4), n) = match itype {
+	let (res8, res4, n) = match itype {
 		add | adc | inc => {
 			(
-				w_acc8 + w_op8 + w_ci8,
-				w_acc4 + w_op4 + w_ci4,
+				acc8.wrapping_add(op8).wrapping_add(ci8),
+				acc4.wrapping_add(op4).wrapping_add(ci4),
 				false 
 			)
 		},
 		sub | sbc | dec | cp => {
 			(
-				w_acc8 - w_op8 - w_ci8,
-				w_acc4 - w_op4 - w_ci4,
+				acc8.wrapping_sub(op8).wrapping_sub(ci8),
+				acc4.wrapping_sub(op4).wrapping_sub(ci4),
 				true 
 			)
 		},

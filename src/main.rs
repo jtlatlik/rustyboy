@@ -3,39 +3,60 @@ mod core;
 mod rom;
 mod system;
 mod gui;
+mod prompt;
+mod logger;
+
+extern crate getopts;
+#[macro_use] extern crate log;
 
 use std::env;
 use std::process;
+use std::io::Write;
 
-use core::cpu::CPU;
-use system::system::GBSystem;
-use core::operands::Reg16Operand;
-use std::str::FromStr;
+use std::fs::File;
+
+use getopts::Options;
 
 use rom::*;
 
-use std::sync::{Arc, RwLock};
-use std::rc::Rc;
-
-//use core::memory::*;
-//use core::register::Contents;
-
 fn main() {
     let args : Vec<_> = env::args().collect();
-    let mut max_insns = None;
-    match args.len() {
-    	2 => {}, 
-    	3 => {
-    		max_insns = Some(u64::from_str(&args[2]).unwrap())
-    	},
-    	_ => {
-			println!("Usage: {} ROM_FILE.gb", args[0]);
-        	process::exit(1)
+    
+    let mut opts = Options::new();
+    
+    opts.optflag("i", "interactive", "start in interactive mode");
+    opts.optflag("h", "help", "print this help information");
+    opts.optflag("l", "log", "enable logging (disabled by default)");
+    opts.optopt("t", "trace", "set trace output file name", "FILE");
+    
+    let progname = args[0].clone();
+    
+    let matches = match opts.parse(&args[1..]) {
+    	Ok(m) => m,
+    	Err(e) => {
+    		writeln!(&mut std::io::stderr(), "Error: {}", e.to_string()).unwrap();
+    		return
     	}
+    };
+    
+    if matches.opt_present("h") {
+    	print_usage(opts, &progname);
+    	return;
     }
     
-    let filename = &args[1];
-    let rom = match Rom::create_from_file(filename) {
+    if matches.opt_present("l") {
+    	logger::init().unwrap();
+    }
+    
+	//positional arguments
+	if matches.free.len() != 1 {
+    	print_usage(opts, &progname);
+    	return
+	}
+	
+	let romfile = matches.free[0].clone();
+
+    let rom = match Rom::create_from_file(&romfile) {
         Ok(n) => n,
         Err(err) => {
             println!("Error: {}" ,err);
@@ -43,34 +64,37 @@ fn main() {
         }
     };
     
-    //rom.dump_header();
+    let (mut cpu, sys) = system::init(rom);
     
+    let mut trace_handle = None;
     
-    let mut raw_sys = GBSystem::new(rom);
-    
-    raw_sys.write8(0xff10, 0x80);
-    
-
-
-	//create CPU peripherals
-	let sys = Arc::new(RwLock::new(raw_sys));
-	//create CPU
-	let mut cpu = CPU::new(sys.clone());
+    if let Some(filename) = matches.opt_str("t") {
+    	//open file...
+    	cpu.trace_enabled = true;
+    	trace_handle = Some(File::create(filename).unwrap());
+    }
 	
-	cpu.regs.pc = 0x100;
-    cpu.regs.set16(Reg16Operand::af, 0x01b0);
-    cpu.regs.bc = 0x0013;
-    cpu.regs.de = 0x00d8;
-    cpu.regs.hl = 0x014d;
-    cpu.regs.sp = 0xfffe;
+    if matches.opt_present("i") {
+    	prompt::show(cpu, sys);
+    	return
+    }
 	
-	//create CPU
-	let gui_handle = gui::init(sys.clone());
-	let sys_handle = system::start(cpu, sys.clone());
+	gui::init(&sys.borrow());
+	
+	loop {
+		let trace = cpu.run_instruction();
+		
+		if let Some(trace_line) = trace {
 
-	match gui_handle.join() {
-		Ok(_) => (),
-		Err(_) => panic!("gui thread panic")
-	};
+			if let Some(ref mut tracefile) = trace_handle {
+				tracefile.write_all(trace_line.as_bytes()).unwrap();
+			}
+		}
+	}
 	
+}
+
+fn print_usage(opts : Options, progname : &str) {
+	let brief = format!("Usage: {} ROM_FILE.gb [options]", progname);
+	print!("{}", opts.usage(&brief));
 }

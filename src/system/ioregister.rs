@@ -1,4 +1,5 @@
 use std::ops::{Deref, DerefMut};
+use std::fmt;
 use super::system::MemoryAccess;
 
 pub struct IORegister {
@@ -32,6 +33,11 @@ impl IORegister {
 		}
 	}
 	
+	pub fn set(mut self, data : u8) -> IORegister {
+		self.data = data;
+		self
+	}
+	
 	pub fn write_mask(mut self, mask : u8) -> IORegister {
 		self.wmask = mask;
 		self
@@ -57,6 +63,13 @@ impl Default for IORegister {
 	fn default() -> IORegister {
 		IORegister::new()
 	}	
+}
+
+
+impl fmt::Display for IORegister {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.data)
+    }
 }
 
 impl MemoryAccess for IORegister {
