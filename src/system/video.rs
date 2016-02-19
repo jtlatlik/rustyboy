@@ -322,7 +322,9 @@ impl VideoData {
 					
 					let screen_x = s.x.wrapping_add(c);
 					if screen_x < 160 {
-						bb_row[(s.x + c) as usize] =  self.obp_palette[s.palette_1_sel as usize][col_index as usize] as u8;
+						if col_index != 0 { //sprite col 0 is transparent
+						bb_row[screen_x as usize] =  self.obp_palette[s.palette_1_sel as usize][col_index as usize] as u8;
+						}
 					}
 				}
 			}			
