@@ -74,10 +74,12 @@ impl fmt::Display for IORegister {
 
 impl MemoryAccess for IORegister {
 	
+	#[inline(always)]
 	fn write(&mut self, _: u16, data: u8) {
 		self.data = (data & self.wmask) | ((!self.wmask) & self.data)
 	}
 	
+	#[inline(always)]
 	fn read(&mut self, _: u16) -> u8 {
 		self.data & self.rmask
 	}

@@ -78,10 +78,13 @@ impl Default for SoundRegisters {
 }
 
 impl MemoryAccess for WaveRAM {
+	
+	#[inline(always)]
 	fn read(&mut self, addr: u16) -> u8 {
 		self.0[addr as usize]
 	}
 	
+	#[inline(always)]
 	fn write(&mut self, addr: u16, data: u8) {
 		self.0[addr as usize] = data;
 	}

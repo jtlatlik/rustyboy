@@ -9,6 +9,7 @@ use core::cpu::CPU;
 use core::operands::{Reg8Operand, Reg16Operand};
 use system::system::GBSystem;
 use rom::*;
+use gui::GUI;
 
 macro_rules! extract_arg {
 	($tok:ident, $i:expr, $name:expr) => {
@@ -31,7 +32,7 @@ macro_rules! extract_opt_arg {
 	}
 }
 
-pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>) {
+pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>, mut gui : GUI) {
 
 	let (mut cpu, mut system) = (cpu, &mut system);
 	let mut breakpoints : Vec<u16> = Vec::new();
@@ -87,18 +88,41 @@ pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>) {
 				}
 			},
 			"set" => { // set register to value
-				let reg_str = extract_arg!(tokens, 1, "register");
-				let value_str = extract_arg!(tokens, 2, "value");
-				let val = match u16::from_str_radix(&value_str, 16) {
-					Ok(n) => n,
-					Err(e) => {
-						println!("Parse error: {}", e);
-						continue
+				let mut target_str = extract_arg!(tokens, 1, "register or memory address");
+				let mut values : Vec<u16> = Vec::new();
+				if tokens.len() < 3 {
+					println!("missing argument: value");
+					continue
+				}
+				for token in &tokens[2..] {
+					let val = match u16::from_str_radix(&token, 16) {
+						Ok(n) => n,
+						Err(e) => {
+							println!("Parse error: {}", e);
+							continue
+						}
+					};
+					values.push(val)
+				}
+
+				//try address first
+				if target_str.starts_with("(") && target_str.ends_with(")") {
+					let mut addr_str : String = target_str[1..].to_string();
+					addr_str.pop();
+					match u16::from_str_radix(&addr_str, 16) {
+						Ok(mut addr) => { 
+							for v in &values {
+								system.borrow_mut().write8(addr, *v as u8);
+								addr = addr.wrapping_add(1)							
+							}
+						},
+						Err(_) => println!("Invalid address")
 					}
-				};
-				match reg_str {
-					"af" | "bc" | "de" | "hl" | "sp" | "pc"  => cpu.regs.set16(Reg16Operand::from_str(reg_str), val),
-					"a" | "b" | "c" | "d" | "e" | "h" | "l" => cpu.regs.set8(Reg8Operand::from_str(reg_str), val as u8),
+					continue			
+				}
+				match target_str {
+					"af" | "bc" | "de" | "hl" | "sp" | "pc"  => cpu.regs.set16(Reg16Operand::from_str(target_str), values[0]),
+					"a" | "b" | "c" | "d" | "e" | "h" | "l" => cpu.regs.set8(Reg8Operand::from_str(target_str), values[0] as u8),
 					_ => println!("Invalid register") 
 				}
 			}
@@ -143,7 +167,7 @@ pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>) {
 			},
 			"run" => {
 				let max_insns = if let Some(n_str) = extract_opt_arg!(tokens, 1) {  
-					match u16::from_str_radix(&n_str, 10) {
+					match u32::from_str_radix(&n_str, 10) {
 						Ok(n) => Some(n),
 						Err(e) => {
 							println!("Parse error: {}", e);
@@ -157,11 +181,13 @@ pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>) {
 				if let Some(mut n) = max_insns {
 					while n > 0 {
 						cpu.run_instruction();
+						gui.update(&mut cpu);
 						n-=1
 					}
 				} else {
 					loop {
 						cpu.run_instruction();
+						gui.update(&mut cpu);
 
 						if breakpoints.contains(&cpu.regs.pc) {
 							println!("Breakpoint triggered at {:>04x}", cpu.regs.pc); 

@@ -8,16 +8,21 @@ mod logger;
 
 extern crate getopts;
 #[macro_use] extern crate log;
+extern crate time;
+
+#[macro_use]
+extern crate bitflags;
+
 
 use std::env;
 use std::process;
 use std::io::Write;
-
 use std::fs::File;
-
 use getopts::Options;
-
+use core::instruction::{Instruction, InstructionType};
+use core::operands::{Reg16Operand,Operand,CCOperand};
 use rom::*;
+
 
 fn main() {
     let args : Vec<_> = env::args().collect();
@@ -65,36 +70,52 @@ fn main() {
     };
     
     let (mut cpu, sys) = system::init(rom);
-    
-    let mut trace_handle = None;
-    
+	    
     if let Some(filename) = matches.opt_str("t") {
-    	//open file...
-    	cpu.trace_enabled = true;
-    	trace_handle = Some(File::create(filename).unwrap());
+    	cpu.set_trace_file(File::create(filename).unwrap())
     }
+	
+	let mut gui = gui::init();
 	
     if matches.opt_present("i") {
-    	prompt::show(cpu, sys);
+    	prompt::show(cpu, sys, gui);
     	return
     }
-	
-	gui::init(&sys.borrow());
-	
-	loop {
-		let trace = cpu.run_instruction();
-		
-		if let Some(trace_line) = trace {
 
-			if let Some(ref mut tracefile) = trace_handle {
-				tracefile.write_all(trace_line.as_bytes()).unwrap();
-			}
-		}
-	}
-	
+//	let mut real_time : f64 = 0.0;
+//	let mut emulation_time :f64 = 0.0;
+	loop {
+		cpu.run_instruction();
+		gui.update(&mut cpu);
+		//println!("emu: {}ns, render:{}ns", time_cpu1-time_cpu0, time_sys1-time_sys0);
+	}	
 }
 
 fn print_usage(opts : Options, progname : &str) {
 	let brief = format!("Usage: {} ROM_FILE.gb [options]", progname);
 	print!("{}", opts.usage(&brief));
 }
+
+//	let mut crc : u32 = !0;
+//	for flags in 0..16 {
+//		for acc in 0..256 {
+//			let insn = Instruction {
+//				itype : InstructionType::daa,
+//				dest : Operand::none,
+//				src : [Operand::none; 2],
+//				cc : CCOperand::none,
+//				length : 1
+//			};
+//			let pre = (acc << 8) | (flags << 4);
+//			cpu.regs.set16(Reg16Operand::af, pre);
+//			cpu.execute(insn);
+//			let post = cpu.regs.get16(Reg16Operand::af);
+//			//calculate crc checksums
+//			let crcacc = update_crc(crc ^ (((post >> 8) as u32)&0xff));
+//			let crcflags = update_crc(crcacc ^ ((post as u32 )&0xff));
+//			println!("{:04x} {:04x}\t{:08x} {:08x}", pre, post, crcacc, crcflags);
+//			crc =crcflags;
+//		}
+//		
+//	}
+//	return;

@@ -74,7 +74,7 @@ impl fmt::Display for Instruction {
         write!(f, "{:?}{}\t", self.itype, self.cc);
 
         match self.itype {
-            invalid | nop | ret | reti | di | ei | halt| stop => Ok(()),
+            invalid | nop | ret | reti | di | ei | halt | daa | stop => Ok(()),
             jp | jr | call | push | rst => write!(f, "{}", self.src[0]),
             inc | dec | pop => write!(f, "{}", self.dest),
             bit | set | res => write!(f, "{}, {}", self.src[1], self.src[0]),

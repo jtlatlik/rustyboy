@@ -11,7 +11,7 @@ pub const SUB_FLAG : i32 = 6;
 pub const ZERO_FLAG : i32 = 7;
 
 pub struct GBRegisters {
-    af : Register,
+    pub af : Register,
     pub bc : Register,
     pub de : Register,
     pub hl : Register,
@@ -30,7 +30,7 @@ impl GBRegisters {
             hl : 0,
             sp : 0,
             pc : 0,
-            ime : true,
+            ime : false,
         }
 	}
     

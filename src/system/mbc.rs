@@ -2,7 +2,7 @@ use rom::*;
 use rom::header::CartridgeType as CType;
 use self::MBCType::*;
 use super::system::MemoryAccess;
-use std::cmp::min;
+use std::cmp::max;
 
 const EXT_RAM_BANK_SIZE :usize = 8*1024;
 
@@ -56,33 +56,35 @@ impl MBC {
 
 impl MemoryAccess for MBC {
 	
+	#[inline(always)]
 	fn read(&mut self, addr: u16) -> u8 {
 		
-		match addr {
-			0x0000 ... 0x3fff => self.rom.banks[0][addr as usize],
-			0x4000 ... 0x7fff => self.rom.banks[self.rom_bank as usize][(addr - 0x4000) as usize],
-			0xa000 ... 0xbfff => self.ram[(addr - 0xa000) as usize],
+		match addr >> 8 {
+			0x00 ... 0x3f => self.rom.banks[0][addr as usize],
+			0x40 ... 0x7f => self.rom.banks[self.rom_bank as usize][(addr - 0x4000) as usize],
+			0xa0 ... 0xbf => self.ram[(addr - 0xa000) as usize],
 			_ => unimplemented!()
 		}
 	}
 	
+	#[inline(always)]
 	fn write(&mut self, addr: u16, data: u8) {
-		match addr {
-			0xa000 ... 0xbfff => self.ram[(addr - 0xa000) as usize] = data,
+		match addr >> 8 {
+			0xa0 ... 0xbf => self.ram[(addr - 0xa000) as usize] = data,
 			_ => {
 				match self.ctype {
 					None => (), //ignore writes if no MBC present
-					MBC1 => match addr {
-						0x0000 ... 0x1fff => (), //RAM disable/enable
-						0x2000 ... 0x3fff => self.rom_bank = (self.rom_bank & 0xe0) | min(1, data & 0x1f),
-						0x4000 ... 0x5fff => {
+					MBC1 => match addr >> 8 {
+						0x00 ... 0x1f => (), //RAM disable/enable
+						0x20 ... 0x3f => self.rom_bank = (self.rom_bank & 0xe0) | max(1, data & 0x1f),
+						0x40 ... 0x5f => {
 							if self.ram_mode {
-								self.ram_bank = data& 0x3;
+								self.ram_bank = data & 0x3;
 							} else {
-								self.rom_bank &= (self.rom_bank & 0x1f) | (data & 0x3)<<5;
+								self.rom_bank &= (self.rom_bank & 0x1f) | ((data & 0x3)<<5);
 							}
 						},
-						0x6000 ... 0x7fff => self.ram_mode = data != 0,
+						0x60 ... 0x7f => self.ram_mode = data != 0,
 						_ => unreachable!()
 					},
 					_ => unimplemented!()

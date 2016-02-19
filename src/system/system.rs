@@ -1,18 +1,22 @@
 use std::io::Write;
 
-use std::sync::{Arc, RwLock};
+use std::rc::Rc;
+use std::cell::RefCell;
 
+use std::sync::mpsc::{self, Receiver, Sender};
 use core::memory::Memory;
 use rom::Rom;
 
 use super::ioregister::IORegister;
 use super::mbc::MBC;
-use super::video::VideoData;
+use super::video::{VideoData, VRAMBank, OAM};
 use super::sound::SoundData;
 use super::timer::TimerRegisters;
 use super::interrupt::InterruptRegisters;
 use super::serial::SerialRegisters;
 use super::wram::*;
+use super::joypad::Joypad;
+
 
 macro_rules! bits {
 	( $($bit:expr)* ) => ( 0x00 $( | (1<<$bit) )* )
@@ -48,18 +52,17 @@ impl<T: MemoryAccess> MemoryAccess for Arc<RwLock<T>> {
 pub struct GBSystem {
 
 	pub mbc	: MBC,
-	pub video : Arc<RwLock<VideoData>>,
+	pub video : VideoData,
 	pub sound : SoundData,
-	
+	pub interrupt_regs : Rc<RefCell<InterruptRegisters>>,
+	pub joypad : Joypad,
+		
 	wram0 : WRAMBank,
 	wram1 : WRAMBank,
-	
-	pub interrupt_regs : Arc<RwLock<InterruptRegisters>>,
 	timer_regs : TimerRegisters,
 	serial_regs : SerialRegisters,
-	joypad : IORegister,
-	zero_page : ZeroPageRAM,
 	
+	zero_page : ZeroPageRAM,
 	dummy : IODummy,
 }
 
@@ -68,126 +71,187 @@ impl GBSystem {
 	pub fn new(rom : Rom) -> GBSystem {
 		
 		//generate shared iregs instance first
-		let iregs = Arc::new(RwLock::new(InterruptRegisters{ ..Default::default() }));
-
+		let iregs = Rc::new(RefCell::new(InterruptRegisters{ ..Default::default() }));
+		
 		GBSystem {
 			mbc : MBC::new(rom),
 			wram0 : WRAMBank(Box::new([0; WRAM_BANK_SIZE])),
 			wram1 : WRAMBank(Box::new([0; WRAM_BANK_SIZE])),
-			video : Arc::new(RwLock::new(VideoData::new(iregs.clone()))),
+			video : VideoData::new(iregs.clone()),
 			interrupt_regs : iregs.clone(),
 			timer_regs : TimerRegisters::new(iregs.clone()),
 			sound : SoundData{ ..Default::default() },
 			serial_regs : SerialRegisters{ ..Default::default() },
 			zero_page : ZeroPageRAM(Box::new([0; 128])),
-			joypad: IORegister::new().set(0x0f).write_mask(bits!(5 4)),
-			dummy: IODummy,
-			
+			joypad: Joypad::new(),
+			dummy: IODummy
 		}
 	}
 	
 	pub fn update(&mut self, delta: u32) {
 		
-		let mut video = self.video.write().unwrap();
-		video.update(delta);
+		self.video.update(delta);
 		self.timer_regs.update(delta);
+		
+		for _ in 0..(delta/4) {
+			if self.video.oam.dma_transfer {
+				let addr = self.video.oam.dma_addr;
+				let data = self.read8(addr);
+				let index = addr & 0xff;
+				self.video.oam.write(index, data);
+				if index + 1 == 0xa0 {
+					self.video.oam.dma_transfer = false;
+				}
+				self.video.oam.dma_addr = addr+1;
+			}
+		}
 	}
 
 
     pub fn read8(&mut self, addr: u16) -> u8 {
-    	let mut data = 0u8;
-    	self.dispatch(addr, &mut data, false);
-    	data
-    	//let(target,offset) = self.decode(addr); 
-		//target.read(offset)
+    	let addr_l = addr as u8;
+    	let addr_h = (addr >> 8) as u8;
+		match addr_h {
+			0x00 ... 0x7f => self.mbc.read(addr),
+			0x80 ... 0x9f => self.video.vram0.read(addr - 0x8000),
+			0xa0 ... 0xbf => self.mbc.read(addr), 
+			0xc0 ... 0xcf => self.wram0.read(addr - 0xc000),
+			0xd0 ... 0xdf => self.wram1.read(addr - 0xd000),
+			0xe0 ... 0xef => self.wram0.read(addr - 0xe000),
+			0xf0 ... 0xfd => self.wram1.read(addr - 0xf000),
+			0xfe => match addr_l {
+				0x00 ... 0x9f => self.video.oam.read(addr - 0xfe00),
+				0xa0 ... 0xff => self.dummy.read(addr),
+				_ => unreachable!()
+			},
+			0xff => match addr_l {
+				0x00 => self.joypad.get_register(), 					//JOYPAD
+				0x01 => self.serial_regs.data.read(addr),		//SB
+				0x02 => self.serial_regs.control.read(addr),		//SC
+				0x04 => self.timer_regs.read_divider(),
+				0x05 => self.timer_regs.read_counter(),
+				0x06 => self.timer_regs.modulo.read(addr),
+				0x07 => self.timer_regs.control.read(addr),
+				
+	    		0x0f => self.interrupt_regs.borrow_mut().iflags.read(addr),
+				0x10 => self.sound.regs.ch1_sweep.read(addr),
+				0x11 => self.sound.regs.ch1_length_duty.read(addr),
+				0x12 => self.sound.regs.ch1_vol_env.read(addr),
+				0x13 => self.sound.regs.ch1_freq_low.read(addr),
+				0x14 => self.sound.regs.ch1_freq_high.read(addr),
+				
+				0x16 => self.sound.regs.ch2_length_duty.read(addr),
+				0x17 => self.sound.regs.ch2_vol_env.read(addr),
+				0x18 => self.sound.regs.ch2_freq_low.read(addr),
+				0x19 => self.sound.regs.ch2_freq_high.read(addr),
+				0x1a => self.sound.regs.ch3_snd_on_off.read(addr),
+				0x1b => self.sound.regs.ch3_snd_length.read(addr),
+				0x1c => self.sound.regs.ch3_out_level.read(addr),
+				0x1d => self.sound.regs.ch3_freq_low.read(addr),
+				0x1e => self.sound.regs.ch3_freq_high.read(addr),
+				
+				0x20 => self.sound.regs.ch4_snd_length.read(addr),
+				0x21 => self.sound.regs.ch4_vol_env.read(addr),
+				0x22 => self.sound.regs.ch4_poly_cnt.read(addr),
+				0x23 => self.sound.regs.ch4_cnt_init.read(addr),
+				0x24 => self.sound.regs.ctrl_vol.read(addr),
+				0x25 => self.sound.regs.ctrl_ch_mux.read(addr),
+				0x26 => self.sound.regs.ctrl_on_off.read(addr),
+				
+				0x30 ... 0x3f => self.sound.wave_ram.read(addr - 0xff30),
+				0x40 => self.video.lcd_ctrl.read(),									// LCDC
+				0x41 => self.video.regs.lcd_status.read(addr),						// STAT
+				0x42 => self.video.regs.scy.read(addr),								// SCY
+				0x43 => self.video.regs.scx.read(addr),								// SCX
+				0x44 => self.video.regs.ly.read(addr),								// LY
+				0x45 => self.video.regs.lyc.read(addr),								// LYC
+				0x46 => self.video.oam.dma_start_address(),							// OAM DMA
+				0x47 => self.video.get_bg_palette(),								// BGP
+				0x48 => self.video.get_obp0_palette(),								// OBP0
+				0x49 => self.video.get_obp1_palette(),								// OBP1
+				0x4a => self.video.regs.wy.read(addr),								// WY
+				0x4b => self.video.regs.wx.read(addr),								// Wx
+				
+				0x80 ... 0xfe => self.zero_page.read(addr - 0xff80),			// Zero Page RAM
+				0xff => self.interrupt_regs.borrow_mut().ienable.read(addr),			// IE
+				_ => self.dummy.read(addr)
+			},
+			_ => unreachable!()
+		}
     }
 
     pub fn write8(&mut self, addr: u16, data: u8) {
-		//print!("(0x{:04x}) = 0x{:>02x}", addr, data);
-		let mut data = data;
-		self.dispatch(addr, &mut data, true);
-		
-		//let(target,offset) = self.decode(addr); 
-    }
-        
-	fn dispatch(&mut self, addr: u16, data: &mut u8, write: bool) {
-
-		//acquire all neccessary locks and borrows
-		let mut vdata_lock = self.video.write().unwrap();
-		let vdata : &mut VideoData = &mut vdata_lock;
-		let iregs = &mut self.interrupt_regs.write().unwrap();
-		
-		let (target, offset) : (&mut MemoryAccess, u16) = match addr {
-    		0x0000 ... 0x7fff => (&mut self.mbc, addr),				// ROM
-    		0x8000 ... 0x9fff => (vdata, addr),			// VRAM
-    		0xa000 ... 0xbfff => (&mut self.mbc, addr),				// EXT RAM
-    		0xc000 ... 0xcfff => (&mut self.wram0, addr&0xfff),		// WRAM bank0
-    		0xd000 ... 0xdfff => (&mut self.wram1, addr&0xfff),		// WRAM bank1
-    		0xe000 ... 0xefff => (&mut self.wram0, addr&0xfff),		// WRAM bank0 shadow
-    		0xf000 ... 0xfdff => (&mut self.wram1, addr&0xfff),		// WRAM bank1 shadow
-    		0xfe00 ... 0xfe9f => (vdata, addr),			// OAM
-    		0xfea0 ... 0xfeff => (&mut self.dummy, 0), 				// Not usable
-    		
-    		0xff00 => (&mut self.joypad, 0),
-			0xff01 => (&mut self.serial_regs.data, 0),				// SB
-			0xff02 => (&mut self.serial_regs.control, 0),			// SC
-    		
-			0xff04 => (&mut self.timer_regs.divider, 0),			// DIV
-			0xff05 => (&mut self.timer_regs.counter, 0),			// TIMA
-			0xff06 => (&mut self.timer_regs.modulo, 0),				// TMA
-			0xff07 => (&mut self.timer_regs.control, 0),			// TAC
-    		
-    		0xff0f => (&mut iregs.iflags, 0),						// IF
-			0xff10 => (&mut self.sound.regs.ch1_sweep, 0),
-			0xff11 => (&mut self.sound.regs.ch1_length_duty, 0),
-			0xff12 => (&mut self.sound.regs.ch1_vol_env, 0),
-			0xff13 => (&mut self.sound.regs.ch1_freq_low, 0),
-			0xff14 => (&mut self.sound.regs.ch1_freq_high, 0),
-			
-			0xff16 => (&mut self.sound.regs.ch2_length_duty, 0),
-			0xff17 => (&mut self.sound.regs.ch2_vol_env, 0),
-			0xff18 => (&mut self.sound.regs.ch2_freq_low, 0),
-			0xff19 => (&mut self.sound.regs.ch2_freq_high, 0),
-			0xff1a => (&mut self.sound.regs.ch3_snd_on_off, 0),
-			0xff1b => (&mut self.sound.regs.ch3_snd_length, 0),
-			0xff1c => (&mut self.sound.regs.ch3_out_level, 0),
-			0xff1d => (&mut self.sound.regs.ch3_freq_low, 0),
-			0xff1e => (&mut self.sound.regs.ch3_freq_high, 0),
-			
-			0xff20 => (&mut self.sound.regs.ch4_snd_length, 0),
-			0xff21 => (&mut self.sound.regs.ch4_vol_env, 0),
-			0xff22 => (&mut self.sound.regs.ch4_poly_cnt, 0),
-			0xff23 => (&mut self.sound.regs.ch4_cnt_init, 0),
-			0xff24 => (&mut self.sound.regs.ctrl_vol, 0),
-			0xff25 => (&mut self.sound.regs.ctrl_ch_mux, 0),
-			0xff26 => (&mut self.sound.regs.ctrl_on_off, 0),
-			
-			0xff30 ... 0xff3f => (&mut self.sound.wave_ram, addr & 0xf),
-			0xff40 => (&mut vdata.regs.lcd_ctrl, 0),						// LCDC
-			0xff41 => (&mut vdata.regs.lcd_status, 0),						// STAT
-			0xff42 => (&mut vdata.regs.scy, 0),								// SCY
-			0xff43 => (&mut vdata.regs.scx, 0),								// SCX
-			0xff44 => (&mut vdata.regs.ly, 0),								// LY
-			0xff45 => (&mut vdata.regs.lyc, 0),								// LYC
-			
-			0xff47 => (&mut vdata.regs.bgp, 0),								// BGP
-			0xff48 => (&mut vdata.regs.obp0, 0),							// OBP0
-			0xff49 => (&mut vdata.regs.obp1, 0),							// OBP1
-			0xff4a => (&mut vdata.regs.wy, 0),								// WY
-			0xff4b => (&mut vdata.regs.wx, 0),								// Wx
-			
-    		0xff80 ... 0xfffe => (&mut self.zero_page, addr&0x7f),			// Zero Page RAM
-    		0xffff => (&mut iregs.ienable, 0),								// IE
-    		_ => (&mut self.dummy, 0)
-    	};
-		
-		if write {
-			target.write(offset, *data)
-		} else {
-			*data = target.read(offset)
+    	let addr_l = addr as u8;
+    	let addr_h = (addr >> 8) as u8;
+		match addr_h {
+			0x00 ... 0x7f => self.mbc.write(addr, data),
+			0x80 ... 0x9f => self.video.vram0.write(addr - 0x8000, data),
+			0xa0 ... 0xbf => self.mbc.write(addr, data), 
+			0xc0 ... 0xcf => self.wram0.write(addr - 0xc000, data),
+			0xd0 ... 0xdf => self.wram1.write(addr - 0xd000, data),
+			0xe0 ... 0xef => self.wram0.write(addr - 0xe000, data),
+			0xf0 ... 0xfd => self.wram1.write(addr - 0xf000, data),
+			0xfe => match addr_l {
+				0x00 ... 0x9f => self.video.oam.write(addr - 0xfe00,data),
+				0xa0 ... 0xff => self.dummy.write(addr,data),
+				_ => unreachable!()
+			},
+			0xff => match addr_l {
+				0x00 => self.joypad.set_register(data),					//JOYPAD
+				0x01 => self.serial_regs.data.write(addr, data),		//SB
+				0x02 => self.serial_regs.control.write(addr, data),		//SC
+				0x04 => self.timer_regs.clear_divider(),
+				0x05 => self.timer_regs.write_counter(data),
+				0x06 => self.timer_regs.modulo.write(addr, data),
+				0x07 => self.timer_regs.control.write(addr, data),
+				
+	    		0x0f => self.interrupt_regs.borrow_mut().iflags.write(addr, data),
+				0x10 => self.sound.regs.ch1_sweep.write(addr, data),
+				0x11 => self.sound.regs.ch1_length_duty.write(addr, data),
+				0x12 => self.sound.regs.ch1_vol_env.write(addr, data),
+				0x13 => self.sound.regs.ch1_freq_low.write(addr, data),
+				0x14 => self.sound.regs.ch1_freq_high.write(addr, data),
+				
+				0x16 => self.sound.regs.ch2_length_duty.write(addr, data),
+				0x17 => self.sound.regs.ch2_vol_env.write(addr, data),
+				0x18 => self.sound.regs.ch2_freq_low.write(addr, data),
+				0x19 => self.sound.regs.ch2_freq_high.write(addr, data),
+				0x1a => self.sound.regs.ch3_snd_on_off.write(addr, data),
+				0x1b => self.sound.regs.ch3_snd_length.write(addr, data),
+				0x1c => self.sound.regs.ch3_out_level.write(addr, data),
+				0x1d => self.sound.regs.ch3_freq_low.write(addr, data),
+				0x1e => self.sound.regs.ch3_freq_high.write(addr, data),
+				
+				0x20 => self.sound.regs.ch4_snd_length.write(addr, data),
+				0x21 => self.sound.regs.ch4_vol_env.write(addr, data),
+				0x22 => self.sound.regs.ch4_poly_cnt.write(addr, data),
+				0x23 => self.sound.regs.ch4_cnt_init.write(addr, data),
+				0x24 => self.sound.regs.ctrl_vol.write(addr, data),
+				0x25 => self.sound.regs.ctrl_ch_mux.write(addr, data),
+				0x26 => self.sound.regs.ctrl_on_off.write(addr, data),
+				
+				0x30 ... 0x3f => self.sound.wave_ram.write(addr - 0xff30, data),
+				0x40 => self.video.lcd_ctrl.write(data),									// LCDC
+				0x41 => self.video.regs.lcd_status.write(addr, data),						// STAT
+				0x42 => self.video.regs.scy.write(addr, data),								// SCY
+				0x43 => self.video.regs.scx.write(addr, data),								// SCX
+				0x44 => self.video.regs.ly.write(addr, data),								// LY
+				0x45 => self.video.regs.lyc.write(addr, data),								// LYC
+				0x46 => self.video.oam.trigger_dma(data),									// OAM DMA transfer here
+				0x47 => self.video.set_bg_palette(data),									// BGP
+				0x48 => self.video.set_obp0_palette(data),									// OBP0
+				0x49 => self.video.set_obp1_palette(data),									// OBP1
+				0x4a => self.video.regs.wy.write(addr, data),								// WY
+				0x4b => self.video.regs.wx.write(addr, data),								// Wx
+				
+				0x80 ... 0xfe => self.zero_page.write(addr - 0xff80, data),			// Zero Page RAM
+				0xff => self.interrupt_regs.borrow_mut().ienable.write(addr, data),			// IE
+				_ => self.dummy.write(addr,data)
+			},
+			_ => unreachable!()
 		}
-		
-	}
+    }
+       
     pub fn read16(&mut self, addr: u16) -> u16 {
     	((self.read8(addr.wrapping_add(1)) as u16) << 8) | (self.read8(addr) as u16)
     }

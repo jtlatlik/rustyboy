@@ -309,33 +309,23 @@ impl CPU {
             	}
             },
             daa => {
-            	let rega = regs.get8(Reg8Operand::a);
-            	let mut acc = rega as u16;
-            	let mut c = regs.c_flag();
-            	
-            	if regs.n_flag() {
-            		if (rega & 0xf) > 9 || regs.h_flag() {
-            			acc = acc.wrapping_add(0x06)
-            		}
-            		if rega  > 0x9f || regs.c_flag() {
-            			acc = acc.wrapping_add(0x06)
-            		}
-            	} else {
-					if regs.h_flag() {
-						acc = acc.wrapping_sub(0x06) & 0xff
-					}
-					if regs.c_flag() {
-						acc = acc.wrapping_sub(0x60)
-					}
-            	}
-            	if acc & 0x100 != 0 {
-            		c = true
-            	}
-            	
-				regs.set8(Reg8Operand::a, acc as u8);
-            	regs.set_flag(ZERO_FLAG, (acc & 0xff) == 0);
+            	let mut acc = regs.get8(Reg8Operand::a) as u16;
+				let mut c = false;
+				
+				if regs.n_flag() {
+					if regs.h_flag() { acc = acc.wrapping_sub(0x06) & 0xff }
+					if regs.c_flag() { acc = acc.wrapping_sub(0x60); c = true }
+				} else {
+					if ((acc & 0x0f) > 9) || regs.h_flag() { acc = acc.wrapping_add(0x06) }
+					if (acc > 0x9f) || regs.c_flag() { acc = acc.wrapping_add(0x60); c = true }
+				}
+				let result = acc as u8;
+				
+				c |= (acc & 0x100) != 0;
+				regs.set8(Reg8Operand::a, result);
+				regs.set_flag(ZERO_FLAG, result == 0);
 				regs.set_flag(HALFCARRY_FLAG, false);
-            	regs.set_flag(CARRY_FLAG, c);
+				regs.set_flag(CARRY_FLAG, c);
             	Ok(4)
             },
             cpl => {
@@ -438,11 +428,14 @@ impl CPU {
             jp => {
                 if regs.cc_satisfied(insn.cc) {
                     next_pc = try!(match insn.src[0] {
-                    	imm16(addr) => Ok(addr),
-                    	reg16(r) => Ok(regs.get16(r)),
+                    	imm16(addr) => {
+                    		cycles = 16;
+                    		Ok(addr)
+                    	},
+                    	reg16(Reg16Operand::hl) => Ok(regs.hl),
                     	_ =>  Err(ExecuteError::InvalidSrcOperand(insn.src[0]))
                 	});
-                    Ok(16)
+                    Ok(cycles)
                 } else {
                     Ok(12)
                 }
@@ -455,9 +448,9 @@ impl CPU {
 
                 if regs.cc_satisfied(insn.cc) {
 					next_pc = next_pc.wrapping_add(off8 as u16);
-                	Ok(16)
-                } else {
                 	Ok(12)
+                } else {
+                	Ok(8)
                 }
             },
             call => {

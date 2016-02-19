@@ -1,4 +1,5 @@
 use super::cpu::CPU;
+use system::system::GBSystem;
 
 impl CPU {
 	
@@ -8,7 +9,7 @@ impl CPU {
 			let (iflags,  ienable);
 			{
 				let sys = self.sys.borrow();
-				let iregs = sys.interrupt_regs.read().unwrap();
+				let iregs = sys.interrupt_regs.borrow_mut();
 				iflags = *iregs.iflags;
 				ienable = *iregs.ienable;
 			}
@@ -34,10 +35,7 @@ impl CPU {
 						let mut sys = self.sys.borrow_mut();
 						
 						//reset interrupt flag
-						{
-							let mut iregs = sys.interrupt_regs.write().unwrap(); 
-							iregs.iflags.data &= !(1<<i);
-						}
+						sys.interrupt_regs.borrow_mut().iflags.data &= !(1<<i);
 
 						let isr_addr = match i {
 							0 => 0x40,

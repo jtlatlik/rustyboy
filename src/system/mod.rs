@@ -8,6 +8,7 @@ mod mbc;
 mod interrupt;
 mod wram;
 mod serial;
+mod joypad;
 
 use std::sync::Arc;
 use std::cell::RefCell;
