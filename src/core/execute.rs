@@ -407,12 +407,12 @@ impl CPU {
             },
             nop => Ok(4),
             halt => {
-            	//we emulate halt by keeping the old pc value and setting halt_mode
-            	next_pc = regs.pc;
+            	//println!("entering halt mode");
             	self.halt_mode = true;
             	Ok(4)
             },
             stop => {
+            	//println!("entering stop mode");
             	self.stop_mode = true;
             	Ok(4)
             },

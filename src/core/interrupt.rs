@@ -17,10 +17,13 @@ impl CPU {
 			for i in 0..5 { //check from highest to lowest priority
 				
 				if iflags & ienable & (1<<i) != 0 {
+//					if self.halt_mode {
+//						println!("exiting halt mode!");
+						self.halt_mode = false;						
+//					}
 					
 					if !self.regs.ime {
 						//only possibility to reach this is through halt mode
-						self.halt_mode = false;
 						let next_pc = self.regs.pc.wrapping_add(1); //length of halt
 						self.regs.pc = next_pc;
 						//DMG bug: if IME==0 and halt_mode=true then the next byte after halt is executed twice...
@@ -32,6 +35,7 @@ impl CPU {
 						
 						return Some(cycles);
 					} else {
+						
 						let mut sys = self.sys.borrow_mut();
 						
 						//reset interrupt flag
@@ -52,6 +56,7 @@ impl CPU {
 						sys.write16(self.regs.sp, self.regs.pc);
 						self.regs.pc = isr_addr;
 						
+						//println!("interrupt {} occured. jumping into ISR {:02x}", i, isr_addr);
 						return Some(20);
 					}					
 				}
