@@ -1,3 +1,5 @@
+use self::RamSize::*;
+
 #[derive(Copy, Clone,Debug)]
 pub enum CartridgeType {
     ROM_ONLY = 0x00,
@@ -55,3 +57,19 @@ pub enum RamSize {
     RAM_128K = 0x04,
     RAM_64K = 0x05
 }
+
+impl RamSize {
+	
+	pub fn as_usize(self) -> usize {
+			match self {
+				RAM_NONE => 0,
+				RAM_2K => 2048,
+				RAM_8K => 8192,
+				RAM_32K => 32768,
+				RAM_64K => 64*1024,
+				RAM_128K => 128*1024,
+			}
+	}
+}
+
+
