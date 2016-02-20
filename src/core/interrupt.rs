@@ -4,7 +4,7 @@ use system::system::GBSystem;
 impl CPU {
 	
 	pub fn handle_interrupts(&mut self) -> Option<u32> {
-		//only handle interrupts when interrupts are enabled
+		//only handle interrupts when interrupts are enabled or we're in halt mode
 		if self.regs.ime || self.halt_mode {
 			let (iflags,  ienable);
 			{
@@ -24,10 +24,9 @@ impl CPU {
 					
 					if !self.regs.ime {
 						//only possibility to reach this is through halt mode
-						let next_pc = self.regs.pc.wrapping_add(1); //length of halt
-						self.regs.pc = next_pc;
 						//DMG bug: if IME==0 and halt_mode=true then the next byte after halt is executed twice...
-						let mut insn_bytes = self.fetch(next_pc);
+						let pc = self.regs.pc;
+						let mut insn_bytes = self.fetch(pc);
 						insn_bytes[2] = insn_bytes[1];
 						insn_bytes[1] = insn_bytes[0];
 						let insn = self.decode(insn_bytes);
