@@ -157,7 +157,8 @@ impl VideoData {
 				if self.mode_cycles >= HBLANK_PERIOD  {
 					self.mode_cycles -= HBLANK_PERIOD;
 					*self.regs.ly += 1;
-
+					self.update_coincidence_flag();
+					
 					if *self.regs.ly >= 144 {
 						self.frame_ready = true;
 						self.set_mode(VBLANK);
@@ -180,6 +181,7 @@ impl VideoData {
 				if self.mode_cycles >= HBLANK_PERIOD {
 					self.mode_cycles -= HBLANK_PERIOD;
 					*self.regs.ly = (*self.regs.ly + 1) % 154;
+					self.update_coincidence_flag();
 				}
 				if *self.regs.ly == 0  {
 					self.set_mode(ACCESS_OAM);
@@ -205,14 +207,15 @@ impl VideoData {
 				}
 			}
 		}
-		
-		//update coincidence flag
-		//let coincidence = *self.regs.ly == *self.regs.lyc;
-		//*self.regs.lcd_status = (*self.regs.lcd_status & !(1<<2)) | ((coincidence as u8) << LCD_STATUS_COINCIDENCE);
-		//if coincidence && (*self.regs.lcd_status & (1<<LCD_STATUS_COINCIDENCE_INTERRUPT) != 0) {
-		//	self.request_status_interrupt();
-		//}  
-		
+
+	}
+	
+	fn update_coincidence_flag(&mut self) {
+		let coincidence = *self.regs.ly == *self.regs.lyc;
+		*self.regs.lcd_status = (*self.regs.lcd_status & !(1<<2)) | ((coincidence as u8) << LCD_STATUS_COINCIDENCE);
+		if coincidence && (*self.regs.lcd_status & (1<<LCD_STATUS_COINCIDENCE_INTERRUPT) != 0) {
+			self.request_status_interrupt();
+		}
 	}
 
 	//Getter and setter functions
@@ -293,10 +296,10 @@ impl VideoData {
 		if self.lcd_ctrl.obj_enabled {
 			
 			let sprite_size = if self.lcd_ctrl.obj_size_8x16 { 16 } else { 8 };
-
+			let ly = *self.regs.ly;
 			//find sprites in line
 			let mut line_sprites : Vec<&Sprite> = self.oam.sprite_ram.iter().filter(|&s| {
-				line.wrapping_sub(s.y) < sprite_size
+				ly.wrapping_sub(s.y) < sprite_size //NOTE: sprites are not affected by scy
 			}).take(10).collect();
 			line_sprites.sort_by(|a,b| { 
 				if a.x == b.x { 
@@ -308,12 +311,15 @@ impl VideoData {
 			//draw all sprites in line
 			for s in &line_sprites {
 				let mut tile_index = s.tile;
-				let mut sprite_row = sprite_size - 1 - line.wrapping_sub(s.y);
+				if self.lcd_ctrl.obj_size_8x16 {
+					tile_index &= 0xfe;
+				}
+				let mut sprite_row = ly.wrapping_sub(s.y);
 				if sprite_row >= 8 {
 					sprite_row -= 8;
-					tile_index+=1
+					tile_index = tile_index.wrapping_add(1)
 				}
-				let adj_row = if s.y_flip { sprite_row } else { 7 - sprite_row } as usize;
+				let adj_row = if s.y_flip { 7 - sprite_row } else { sprite_row } as usize;
 				let tile_data = self.vram0.tile_ram[tile_index as usize][adj_row];
 				
 				for c in 0..8 {
