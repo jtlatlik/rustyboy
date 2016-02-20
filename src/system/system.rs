@@ -83,7 +83,7 @@ impl GBSystem {
 			sound : SoundData{ ..Default::default() },
 			serial_regs : SerialRegisters{ ..Default::default() },
 			zero_page : ZeroPageRAM(Box::new([0; 128])),
-			joypad: Joypad::new(),
+			joypad: Joypad::new(iregs.clone()),
 			dummy: IODummy
 		}
 	}
