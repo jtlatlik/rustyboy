@@ -166,7 +166,7 @@ pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>, mut gui : GUI) {
 				}
 			},
 			"run" => {
-				let max_insns = if let Some(n_str) = extract_opt_arg!(tokens, 1) {  
+				let mut max_insns = if let Some(n_str) = extract_opt_arg!(tokens, 1) {  
 					match u32::from_str_radix(&n_str, 10) {
 						Ok(n) => Some(n),
 						Err(e) => {
@@ -177,25 +177,28 @@ pub fn show(mut cpu : CPU, mut system : Arc<RefCell<GBSystem>>, mut gui : GUI) {
 				} else {
 					None
 				};
-				
-				if let Some(mut n) = max_insns {
-					while n > 0 {
-						cpu.run_instruction();
-						gui.update(&mut cpu);
-						n-=1
-					}
-				} else {
-					loop {
-						cpu.run_instruction();
-						gui.update(&mut cpu);
 
-						if breakpoints.contains(&cpu.regs.pc) {
-							println!("Breakpoint triggered at {:>04x}", cpu.regs.pc); 
-							break;							
-						}						
+				loop {
+					if let Some(n) = max_insns {
+						if n == 0 {
+							break;
+						}
+						max_insns = Some(n-1)
+					}
+					
+					cpu.run_instruction();
+					gui.update(&mut cpu);
+					
+					if breakpoints.contains(&cpu.regs.pc) {
+						println!("Breakpoint triggered at {:>04x}", cpu.regs.pc); 
+						break;
+					}
+					
+					if gui.break_request {
+						break;
 					}
 				}
-			}, //TODO run emulation. opt arg: num 
+			}, 
 			"i" | "info" => {
 				system.borrow().mbc.rom.dump_header();
 			}, //TODO print ROM info

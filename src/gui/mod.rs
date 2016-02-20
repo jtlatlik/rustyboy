@@ -34,7 +34,8 @@ pub struct GUI<'a> {
 	renderer : Renderer<'a>,
 	event_pump : EventPump,
 	frames : u32,
-	controller : Option<GameController>
+	controller : Option<GameController>,
+	pub break_request: bool
 }
 
 pub fn init<'a>() -> GUI<'a> {
@@ -74,7 +75,8 @@ pub fn init<'a>() -> GUI<'a> {
 		renderer : renderer,
 		event_pump : event_pump,
 		frames : 0,
-		controller : controller
+		controller : controller,
+		break_request : false,
 	}
 }
 
@@ -82,6 +84,7 @@ impl<'a> GUI<'a> {
 
 	pub fn update(&mut self, cpu : &mut CPU) {
 		
+		self.break_request = false;
 		//thread::spawn(move || {
 		let renderer = &mut self.renderer;
 		let event_pump = &mut self.event_pump;
@@ -93,14 +96,25 @@ impl<'a> GUI<'a> {
 		}
 		
 		self.frames+=1;
+		{
+			let sys = cpu.sys.borrow();
+			let scy = sys.video.regs.scy.data;
+			let scx = sys.video.regs.scx.data;
+			let window_title = &format!("frame {}; scy={}, scx={}", self.frames, scy, scx);
+			
+			
+			renderer.window_mut().unwrap().set_title(window_title);
+		}
 		
 		
-		renderer.window_mut().unwrap().set_title(&format!("frame {}", self.frames));
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                Event::Quit {..} => {
                 	process::exit(0);
                     //break 'running
+                },
+                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
+                	self.break_request = true;
                 },
 	            Event::ControllerButtonDown{ button, .. } => { 
 	            	match button {
