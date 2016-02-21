@@ -9,6 +9,7 @@ use std::sync::mpsc::{self, Sender, Receiver, TryRecvError};
 use std::process;
 use std::collections::HashMap;
 
+
 use system::video::*;
 use system::system::GBSystem;
 use core::cpu::CPU;
@@ -25,17 +26,22 @@ use self::sdl2::rect::Rect;
 use self::sdl2::event::Event;
 use self::sdl2::keyboard::Keycode;
 use self::sdl2::surface::Surface;
-use self::sdl2::controller::{Button, GameController};
+use self::sdl2::controller::{Button, GameController, Axis};
 
 use std::io::Write;
+use time;
 
+const FRAME_SAMPLES: u32 = 30;
 
 pub struct GUI<'a> {
 	renderer : Renderer<'a>,
 	event_pump : EventPump,
 	frames : u32,
 	controller : Option<GameController>,
-	pub break_request: bool
+	pub break_request: bool,
+	pub speed_mode: bool,
+	frame_ns: u64,
+	fps:f64
 }
 
 pub fn init<'a>() -> GUI<'a> {
@@ -77,6 +83,9 @@ pub fn init<'a>() -> GUI<'a> {
 		frames : 0,
 		controller : controller,
 		break_request : false,
+		speed_mode : false,
+		frame_ns : time::precise_time_ns(),
+		fps : 0.0
 	}
 }
 
@@ -85,22 +94,26 @@ impl<'a> GUI<'a> {
 	pub fn update(&mut self, cpu : &mut CPU) {
 		
 		self.break_request = false;
-		//thread::spawn(move || {
 		let renderer = &mut self.renderer;
 		let event_pump = &mut self.event_pump;
-
-//				cpu.run_instruction();
 			
 		if !cpu.sys.borrow().video.frame_ready {
 			return
 		}
 		
-		self.frames+=1;
+		
+		self.frames += 1;
+		if self.frames == FRAME_SAMPLES {
+			let frame_delta = time::precise_time_ns() - self.frame_ns;
+			self.frame_ns += frame_delta;
+			self.fps = (1000000000.0*(FRAME_SAMPLES as f64)) / (frame_delta as f64);
+			self.frames = 0;		
+		}
 		{
 			let sys = cpu.sys.borrow();
 			let scy = sys.video.regs.scy.data;
 			let scx = sys.video.regs.scx.data;
-			let window_title = &format!("frame {}; scy={}, scx={}", self.frames, scy, scx);
+			let window_title = &format!("fps {:.1}; scy={}, scx={}", self.fps, scy, scx);
 			
 			
 			renderer.window_mut().unwrap().set_title(window_title);
@@ -116,6 +129,22 @@ impl<'a> GUI<'a> {
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                 	self.break_request = true;
                 },
+//                Event::ControllerAxisMotion { axis, value: val, .. } => {
+//	                let dead_zone = 5000;
+//	                let neg_zone = val < -dead_zone;
+//	                let pos_zone = val > dead_zone;
+//	                match axis {
+//	                	Axis::LeftX => {
+//	                		cpu.sys.borrow_mut().joypad.set_left_pressed(neg_zone);
+//	                		cpu.sys.borrow_mut().joypad.set_right_pressed(pos_zone)
+//	                	},
+//	                	Axis::LeftY => {
+//	                		cpu.sys.borrow_mut().joypad.set_up_pressed(neg_zone);
+//	                		cpu.sys.borrow_mut().joypad.set_down_pressed(pos_zone)
+//	                	},
+//	                	_ => {}
+//	                }
+//                },
 	            Event::ControllerButtonDown{ button, .. } => { 
 	            	match button {
 	            		Button::A => cpu.sys.borrow_mut().joypad.set_a_pressed(true),
@@ -126,6 +155,7 @@ impl<'a> GUI<'a> {
 	            		Button::DPadLeft => cpu.sys.borrow_mut().joypad.set_left_pressed(true),
 	            		Button::DPadUp => cpu.sys.borrow_mut().joypad.set_up_pressed(true),
 	            		Button::DPadRight => cpu.sys.borrow_mut().joypad.set_right_pressed(true),
+	            		Button::RightShoulder => self.speed_mode = true,
 	            		_ => {}
 	            	}
 	            },
@@ -139,6 +169,7 @@ impl<'a> GUI<'a> {
 	            		Button::DPadLeft => cpu.sys.borrow_mut().joypad.set_left_pressed(false),
 	            		Button::DPadUp => cpu.sys.borrow_mut().joypad.set_up_pressed(false),
 	            		Button::DPadRight => cpu.sys.borrow_mut().joypad.set_right_pressed(false),
+	            		Button::RightShoulder => self.speed_mode = false,
 	            		_ => {}
 	            	}
 	            },

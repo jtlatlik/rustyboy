@@ -82,12 +82,22 @@ fn main() {
     	return
     }
 
-//	let mut real_time : f64 = 0.0;
-//	let mut emulation_time :f64 = 0.0;
+	let mut real_time : f64 = 0.0;
+	let mut emulation_time :f64 = 0.0;
+	let mut t0 = time::precise_time_ns();
 	loop {
-		cpu.run_instruction();
+		emulation_time += cpu.run_instruction();
 		gui.update(&mut cpu);
-		//println!("emu: {}ns, render:{}ns", time_cpu1-time_cpu0, time_sys1-time_sys0);
+		let t1 = time::precise_time_ns();
+		real_time += (t1 - t0) as f64;
+		t0 = t1;
+		if gui.speed_mode {
+			real_time = emulation_time;
+		}
+		let diff = emulation_time - real_time;
+		if diff > 1000000.0 && !gui.speed_mode { //1ms
+			std::thread::sleep(std::time::Duration::new(0, diff as u32))
+		}
 	}	
 }
 

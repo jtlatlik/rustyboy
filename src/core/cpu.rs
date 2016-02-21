@@ -57,11 +57,9 @@ impl CPU {
 			//fetch instruction
 			let pc = self.regs.pc;
 			let insn_bytes = self.fetch(pc);
-			
-			let time_decode_0 = time::precise_time_ns();
+
 			//decode insn
 			let insn = self.decode(insn_bytes);
-			let time_decode_1 = time::precise_time_ns();
 			
 			//print raw and decoded instruction
 			if let Some(ref mut tracefile) = self.trace_file {
@@ -69,42 +67,25 @@ impl CPU {
 				//print register contents and pc
 				trace_line.push_str(&format!("{} | {:04x}:", self.regs, pc));
 				for i in 0..3 {
-					
 					if i < insn.length {
 						trace_line.push_str(&format!(" {:>02x}", insn_bytes[i as usize]));
 					} else {
 						trace_line.push_str("   ");
 					}
-					
 				}
-				trace_line.push_str(&format!(" {}\n", insn));
-	
-	//			trace_line.push_str(&format!("A={:02x} F={:02x} B={:02x} C={:02x} D={:02x} E={:02x} H={:02x} L={:02x} SP={:04x} PC={:04x}\n",
-	//			self.regs.af.high(), self.regs.af.low(), 
-	//			self.regs.bc.high(), self.regs.bc.low(), 
-	//			self.regs.de.high(), self.regs.de.low(),
-	//			self.regs.hl.high(), self.regs.hl.low(), 
-	//			self.regs.sp, self.regs.pc));
-	
+				trace_line.push_str(&format!(" {}\n", insn));	
 				tracefile.write_all(trace_line.as_bytes()).unwrap();
 			}
-	
-			
-			let time_execute_0 = time::precise_time_ns();
 			//execute insn
 			delta_cycles = match self.execute(insn) {
 				Ok(c) => c,
 				Err(e) => {
 					panic!("\n Fatal error during execution: {:?}", e);
 				}
-			};
-			let time_execute_1 = time::precise_time_ns();
+			}
 		}
-		
 		//update periphery
-		let time_system_0 = time::precise_time_ns();
 		self.sys.borrow_mut().update(delta_cycles);
-		let time_system_1 = time::precise_time_ns();
 		
 		//handle interrupts
 		let interrupt_cycles = match self.handle_interrupts() {
@@ -115,8 +96,6 @@ impl CPU {
 			},
 			None => 0
 		};
-		
-		//println!("dec: {}ns, ex: {}ns, sys: {}ns\t({})", time_decode_1-time_decode_0, time_execute_1-time_execute_0, time_system_1-time_system_0, insn);
 		//return simulation time
 		self.clk_period_ns * ((delta_cycles + interrupt_cycles) as f64)
 	}
