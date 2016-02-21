@@ -113,7 +113,9 @@ impl<'a> GUI<'a> {
 			let sys = cpu.sys.borrow();
 			let scy = sys.video.regs.scy.data;
 			let scx = sys.video.regs.scx.data;
-			let window_title = &format!("fps {:.1}; scy={}, scx={}", self.fps, scy, scx);
+			let wx =  sys.video.regs.wx.data;
+			let wy =  sys.video.regs.wy.data;
+			let window_title = &format!("fps {:.1}; scy={}, scx={}, wy={}, wx={}", self.fps, scy, scx, wy, wx);
 			
 			
 			renderer.window_mut().unwrap().set_title(window_title);

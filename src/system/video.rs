@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::boxed::Box;
 use self::VideoMode::*;
 use super::interrupt::{self, InterruptRegisters};
+use std::cmp::max;
 use super::system::MemoryAccess;
 use super::ioregister::IORegister;
 
@@ -50,6 +51,7 @@ pub struct OAM {
 	pub dma_transfer : bool,
 	pub dma_addr : u16,
 }
+
 
 const VBLANK_PERIOD : u32 = 4560;
 const HBLANK_PERIOD : u32 = 204;
@@ -269,16 +271,14 @@ impl VideoData {
 				
 		let bb_row = &mut self.back_buffer[screen_y*160 ..(screen_y +1)*160]; 
 
-		
-		let bgmap_index = self.lcd_ctrl.bg_tile_map_1_sel as usize;
-		let bgmap = &self.vram0.tile_map[bgmap_index];
-		
-		let line = (*self.regs.ly).wrapping_add(*self.regs.scy);
-		let (tile_y, tile_row) = ((line/8 )as usize, (line%8) as usize);
-		let scx = *self.regs.scx;
-		
 		//draw background
 		if self.lcd_ctrl.bg_enabled {
+			let bgmap_index = self.lcd_ctrl.bg_tile_map_1_sel as usize;
+			let bgmap = &self.vram0.tile_map[bgmap_index];
+			let line = (*self.regs.ly).wrapping_add(*self.regs.scy);
+			let (tile_y, tile_row) = ((line/8 )as usize, (line%8) as usize);
+			let scx = *self.regs.scx;
+			
 			for screen_x in 0..160 {
 				let x = (screen_x as u8).wrapping_add(scx);
 				let (tile_x, tile_col) = ((x/8) as usize, (x%8) as usize);
@@ -290,6 +290,29 @@ impl VideoData {
 
 				bb_row[screen_x] = self.bg_palette[col_index as usize] as u8;
 			}
+		}
+		
+		//draw window
+		if self.lcd_ctrl.window_enabled && (*self.regs.wy <= *self.regs.ly) {
+			let wndmap_index = self.lcd_ctrl.window_tile_map_1_sel as usize;
+			let wndmap = &self.vram0.tile_map[wndmap_index];
+			
+			let tile_y = ((*self.regs.ly - *self.regs.wy) / 8 )as usize;
+			let tile_row = ((*self.regs.ly - *self.regs.wy) % 8 )as usize;
+			
+			let start_x = max(0,(*self.regs.wx as i16)-7) as u8;
+			for screen_x in start_x..160 {
+				let tile_x = ((screen_x.wrapping_sub((*self.regs.wx).wrapping_sub(7))) / 8 )as usize;
+				let tile_col = ((screen_x.wrapping_sub(((*self.regs.wx).wrapping_sub(7)))) % 8 )as usize;
+				
+				let ti = wndmap[(tile_y*32 + tile_x) as usize] as usize;
+				let adj_ti = if self.lcd_ctrl.tile_data_1_sel { (256 + ((ti as i8) as i16)) as usize  } else { ti };
+		
+				let tile_data = self.vram0.tile_ram[adj_ti][tile_row as usize];
+				let col_index = (((tile_data[1] >> (7-tile_col)) & 1) << 1) | ((tile_data[0] >> (7-tile_col)) & 1);
+
+				bb_row[screen_x as usize] = self.bg_palette[col_index as usize] as u8;
+			} 
 		}
 
 		//draw sprites
@@ -305,7 +328,7 @@ impl VideoData {
 				if a.x == b.x { 
 					Ordering::Equal
 				} else {
-					if a.x < b.x { Ordering::Less } else { Ordering::Greater } 
+					if a.x > b.x { Ordering::Less } else { Ordering::Greater } 
 				}
 			});
 			//draw all sprites in line
@@ -317,6 +340,10 @@ impl VideoData {
 				let mut sprite_row = ly.wrapping_sub(s.y);
 				if sprite_row >= 8 {
 					sprite_row -= 8;
+					if !s.y_flip {
+						tile_index = tile_index.wrapping_add(1)
+					}
+				} else if s.y_flip && self.lcd_ctrl.obj_size_8x16 {
 					tile_index = tile_index.wrapping_add(1)
 				}
 				let adj_row = if s.y_flip { 7 - sprite_row } else { sprite_row } as usize;
@@ -328,9 +355,12 @@ impl VideoData {
 					
 					let screen_x = s.x.wrapping_add(c);
 					if screen_x < 160 {
-						if col_index != 0 { //sprite col 0 is transparent
-						bb_row[screen_x as usize] =  self.obp_palette[s.palette_1_sel as usize][col_index as usize] as u8;
+						//sprite col 0 and bg color 0 are transparent 
+						if col_index != 0 && (!s.priority || (bb_row[screen_x as usize] == self.bg_palette[0] as u8)) { 
+							bb_row[screen_x as usize] =  self.obp_palette[s.palette_1_sel as usize][col_index as usize] as u8;
 						}
+					} else {
+						break
 					}
 				}
 			}			
